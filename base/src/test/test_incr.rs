@@ -52,7 +52,7 @@ fn content_drops_the_style_and_the_formula_result() {
     );
     assert_eq!(
         Content::of(Some(&Cell::EmptyCell { s: 4 }), &[]),
-        Content::Empty
+        Content::Blank
     );
     assert_eq!(Content::of(None, &[]), Content::Empty);
     let spill = Cell::SpillCell {

@@ -31,7 +31,7 @@ impl Model<'_> {
     /// incremental evaluator runs.
     pub(crate) fn incr_read(&mut self, p: CellReferenceIndex) -> CalcResult {
         match self.incr_content(p) {
-            Content::Empty => CalcResult::EmptyCell,
+            Content::Empty | Content::Blank => CalcResult::EmptyCell,
             Content::Constant(constant) => self.constant_value(constant, p),
             Content::Formula {
                 f, pinned: Some(v), ..

@@ -18,6 +18,9 @@ pub(crate) type Position = (u32, i32, i32);
 #[derive(Clone, PartialEq, Debug)]
 pub(crate) enum Content {
     Empty,
+    /// A cell that holds nothing but exists, for its style: it reads as
+    /// empty, but ISFORMULA and FORMULATEXT tell it from a missing cell.
+    Blank,
     Constant(Constant),
     Formula {
         f: i32,
@@ -43,7 +46,8 @@ pub(crate) enum Constant {
 impl Content {
     pub(crate) fn of(cell: Option<&Cell>, shared_strings: &[String]) -> Content {
         match cell {
-            None | Some(Cell::EmptyCell { .. }) => Content::Empty,
+            None => Content::Empty,
+            Some(Cell::EmptyCell { .. }) => Content::Blank,
             Some(Cell::BooleanCell { v, .. }) => Content::Constant(Constant::Boolean(*v)),
             Some(Cell::NumberCell { v, .. }) => Content::Constant(Constant::Number(*v)),
             Some(Cell::ErrorCell { ei, .. }) => Content::Constant(Constant::Error(ei.clone())),
