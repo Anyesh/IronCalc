@@ -65,6 +65,7 @@ mod tz;
 mod units;
 mod user_model;
 mod utils;
+mod volatile;
 mod workbook;
 
 #[cfg(test)]

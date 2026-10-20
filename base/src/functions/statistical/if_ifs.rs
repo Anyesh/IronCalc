@@ -99,6 +99,7 @@ impl<'a> Model<'a> {
         let right_row = first_range.right.row;
         let right_column = first_range.right.column;
 
+        self.note_dimension_read(first_range.left.sheet);
         let dimension = match self.workbook.worksheet(first_range.left.sheet) {
             Ok(s) => s.dimension(),
             Err(_) => {

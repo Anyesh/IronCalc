@@ -1098,6 +1098,7 @@ impl<'a> Model<'a> {
                     message: "argument must be a reference to a single cell".to_string(),
                 };
             }
+            self.note_content_read(left);
             if let Ok(Some(f)) = self.get_english_cell_formula(left.sheet, left.row, left.column) {
                 CalcResult::String(f)
             } else {

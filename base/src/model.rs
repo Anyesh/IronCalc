@@ -211,6 +211,25 @@ impl ResultPlan {
             clears: Vec::new(),
         }
     }
+
+    /// The value the formula cell stores, if it is written, and the value of
+    /// each spill cell written, by row and column.
+    #[cfg(feature = "incr")]
+    pub(crate) fn into_values(self) -> (Option<FormulaValue>, Vec<(i32, i32, SpillValue)>) {
+        let v = match self.cell {
+            Some(Cell::CellFormula { v, .. } | Cell::ArrayFormula { v, .. }) => Some(v),
+            _ => None,
+        };
+        let spills = self
+            .spills
+            .into_iter()
+            .filter_map(|(row, column, cell)| match cell {
+                Cell::SpillCell { v, .. } => Some((row, column, v)),
+                _ => None,
+            })
+            .collect();
+        (v, spills)
+    }
 }
 
 /// A dynamical IronCalc model.
@@ -256,6 +275,8 @@ pub struct Model<'a> {
     pub(crate) last_lambda_id: usize,
     /// Everything the evaluation algorithm needs besides the workbook. See `evaluation.rs`.
     pub(crate) evaluation: Evaluation,
+    /// What the volatile functions drew in the current recalc.
+    pub(crate) volatile: crate::volatile::VolatileLog,
     /// Evaluated CF results per cell, keyed by (sheet_index, row, column).
     /// Rebuilt from scratch on every call to evaluate_conditional_formatting().
     pub(crate) cf_cache: HashMap<(u32, i32, i32), Vec<CfCellResult>>,
@@ -919,6 +940,7 @@ impl<'a> Model<'a> {
                             "Circular reference detected".to_string(),
                         );
                     }
+                    self.note_content_read(left);
                     let sheet = left.sheet;
                     let row = left.row;
                     let column = left.column;
@@ -1620,6 +1642,7 @@ impl<'a> Model<'a> {
             // A row the sheet holds as numbers is copied as it is. Not while
             // the pass is being abandoned: nothing read then is a value.
             if self.evaluation.restart.is_none() && !self.evaluation.unwinding {
+                self.note_row_read(left.sheet, row, left.column, right.column);
                 let sheet_data = &self.workbook.worksheets[left.sheet as usize].sheet_data;
                 if let Some(row_numbers) =
                     sheet_data.numbers_in_row_between(row, left.column, right.column)
@@ -1655,6 +1678,7 @@ impl<'a> Model<'a> {
         last_column: i32,
         push: &mut impl FnMut(ArrayNode),
     ) {
+        self.note_row_read(sheet, row, first_column, last_column);
         let mut column = first_column;
         while column <= last_column {
             // Constants are read straight from the sheet; what is left,
@@ -1877,6 +1901,7 @@ impl<'a> Model<'a> {
             last_variable_id: 0,
             lambdas: HashMap::new(),
             last_lambda_id: 0,
+            volatile: Default::default(),
             evaluation: Evaluation::default(),
             cf_cache: HashMap::new(),
             links: HashMap::new(),
