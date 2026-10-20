@@ -543,6 +543,7 @@ impl<'a> Model<'a> {
     /// `set_max_evaluation_stack`: whichever limit is reached first applies.
     pub fn set_max_evaluation_depth(&mut self, max_depth: usize) {
         self.evaluation.max_depth = max_depth.max(1);
+        self.follow_evaluation_limits();
     }
 
     /// The limit set by `set_max_evaluation_depth`.
@@ -556,6 +557,14 @@ impl<'a> Model<'a> {
     /// stack is a reasonable value.
     pub fn set_max_evaluation_stack(&mut self, bytes: usize) {
         self.evaluation.max_stack = bytes;
+        self.follow_evaluation_limits();
+    }
+
+    fn follow_evaluation_limits(&mut self) {
+        #[cfg(feature = "incr")]
+        if let Some(state) = &self.incr {
+            state.follow_limits(self.evaluation.max_depth, self.evaluation.max_stack);
+        }
     }
 
     /// The limit set by `set_max_evaluation_stack`.

@@ -425,3 +425,49 @@ fn a_run_of_a_formula_draws_what_its_earlier_runs_drew() {
     model.start_formula_run(a1);
     assert_ne!(model.draw_random(a1), first.0);
 }
+
+#[test]
+fn the_frame_budget_is_one_when_the_engine_unwinds_at_every_formula() {
+    use crate::incr::{frame_budget, MAX_FRAMES};
+    assert_eq!(frame_budget(1), 1);
+    assert_eq!(frame_budget(64), MAX_FRAMES);
+    assert_eq!(frame_budget(usize::MAX), MAX_FRAMES);
+    assert_eq!(MAX_FRAMES, if cfg!(debug_assertions) { 16 } else { 64 });
+}
+
+#[test]
+fn the_budgets_follow_the_evaluation_limits() {
+    let budgets = |model: &Model| model.incr.as_ref().unwrap().budgets();
+    let mut model = new_empty_model();
+    model.set_max_evaluation_depth(1);
+    model.set_max_evaluation_stack(1000);
+    model.set_incremental(true);
+    assert_eq!(budgets(&model), (1, 1000));
+    model.set_max_evaluation_depth(64);
+    assert_eq!(budgets(&model), (crate::incr::MAX_FRAMES, 1000));
+    model.set_max_evaluation_stack(256 * 1024);
+    assert_eq!(budgets(&model), (crate::incr::MAX_FRAMES, 256 * 1024));
+}
+
+/// The reference's nested-function chain (`long_reverse_chains_with_the_default_limits`),
+/// 64 deep, on a 2 MiB thread.
+#[test]
+fn a_chain_of_nested_formulas_fits_a_small_thread() {
+    std::thread::Builder::new()
+        .stack_size(2 << 20)
+        .spawn(|| {
+            let mut model = new_empty_model();
+            for row in 1..64 {
+                model._set(
+                    &format!("B{row}"),
+                    &format!("=IF(TRUE,SUM(1,IF(TRUE,B{}+0,0)),0)", row + 1),
+                );
+            }
+            model._set("B64", "1");
+            assert_matches_reference(&mut model);
+            assert_eq!(model._get_text("B1"), "64");
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
