@@ -329,8 +329,75 @@ pub fn test_file(file_path: &str) -> Result<(), String> {
     set_mock_time_from_metadata(&model1);
     let model1 = load_from_xlsx(file_path, &locale, "UTC", "en").unwrap();
     let mut model2 = load_from_xlsx(file_path, &locale, "UTC", "en").unwrap();
-    model2.evaluate();
+    evaluate(&mut model2);
     compare_models(&model1, &model2)
+}
+
+/// The evaluation the tests check: incremental under the `incr` feature, and
+/// at the depth `IRONCALC_MAX_DEPTH` names, which base reads only in its own
+/// tests.
+fn evaluate(model: &mut Model) {
+    #[cfg(feature = "incr")]
+    model.set_incremental(true);
+    if let Some(depth) = max_depth() {
+        model.set_max_evaluation_depth(depth);
+    }
+    model.evaluate();
+}
+
+fn max_depth() -> Option<usize> {
+    std::env::var("IRONCALC_MAX_DEPTH").ok()?.parse().ok()
+}
+
+/// Loads the workbook at `file_path` as `test_file` does: in its own locale,
+/// with the clock mocked to the time it records.
+#[cfg(feature = "incr")]
+fn load_for_test(file_path: &str) -> Model<'static> {
+    let model = load_from_xlsx(file_path, "en", "UTC", "en").unwrap();
+    let locale = get_workbook_metadata(&model);
+    #[cfg(feature = "mock_time")]
+    set_mock_time_from_metadata(&model);
+    load_from_xlsx(file_path, &locale, "UTC", "en").unwrap()
+}
+
+/// The lockstep differential over the workbook at `file_path`: seeds 1 to 8
+/// of 40 random edits each, at the normal depth and at depth 1.
+/// `IRONCALC_LOCKSTEP_SEED` picks one of the seeds, to split a run.
+#[cfg(feature = "incr")]
+pub fn test_lockstep(file_path: &str) -> Result<(), String> {
+    let seeds = match std::env::var("IRONCALC_LOCKSTEP_SEED") {
+        Ok(seed) => {
+            let seed = seed
+                .parse()
+                .map_err(|e| format!("IRONCALC_LOCKSTEP_SEED: {e}"))?;
+            seed..=seed
+        }
+        Err(_) => 1..=8,
+    };
+    for depth in [None, Some(1)] {
+        for seed in seeds.clone() {
+            ironcalc_base::lockstep::run(
+                load_for_test(file_path),
+                load_for_test(file_path),
+                seed,
+                40,
+                depth,
+            )
+            .map_err(|e| format!("seed {seed}, depth {depth:?}: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Computes every formula of the workbook at `file_path` through the
+/// incremental read path, which panics in a debug build on a read of the
+/// sheet that no node accounts for.
+#[cfg(feature = "incr")]
+pub fn test_read_path(file_path: &str) {
+    let mut model = load_for_test(file_path);
+    model.set_incremental(true);
+    model.evaluate();
+    ironcalc_base::lockstep::compute_every_formula(&mut model);
 }
 
 /// Tests that file in file_path can be converted to xlsx and read again
@@ -353,7 +420,7 @@ pub fn test_load_and_saving(file_path: &str, temp_dir_name: &Path) -> Result<(),
     save_to_xlsx(&model1, temp_file_path).unwrap();
     // test can open
     let mut model2 = load_from_xlsx(temp_file_path, &locale, "UTC", "en").unwrap();
-    model2.evaluate();
+    evaluate(&mut model2);
     compare_models(&model1, &model2)
 }
 

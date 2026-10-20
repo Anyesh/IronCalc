@@ -23,6 +23,17 @@ test-rust:
 	cargo test
 	make remove-artifacts
 
+# The incremental evaluator's gates: base and xlsx with the feature on, at
+# the normal depth and at depth 1, then the EVAL_CTX aliasing under Miri.
+.PHONY: test-incr
+test-incr:
+	cargo test -p ironcalc_base -p ironcalc --features ironcalc_base/incr,ironcalc/incr
+	IRONCALC_MAX_DEPTH=1 cargo test -p ironcalc_base -p ironcalc --features ironcalc_base/incr,ironcalc/incr
+
+.PHONY: miri-incr
+miri-incr:
+	cargo +nightly miri test -p ironcalc_base --features incr --lib incr::miri_
+
 .PHONY: test-js
 test-js:
 	# The nodejs test builds live in their own out-dirs, so the second `make`

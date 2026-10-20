@@ -11,13 +11,14 @@ use incr_compute::{CycleStrategy, QueryOpts, Replay};
 use super::nodes::{tile_of, Computed, Constant, Content, Dimension};
 use super::{ctx, IncrState};
 use crate::calc_result::CalcResult;
-use crate::evaluation::{circular_reference, key, FormulaCell};
+use crate::evaluation::{circular_reference, key, FormulaCell, SheetRead};
 use crate::expressions::token::Error;
 use crate::expressions::types::CellReferenceIndex;
 use crate::model::Model;
 use crate::types::{ArrayKind, Cell, FormulaValue};
 
 impl Model<'_> {
+    #[allow(clippy::expect_used)]
     fn incr_state(&self) -> Rc<IncrState> {
         Rc::clone(
             self.incr
@@ -78,13 +79,19 @@ impl Model<'_> {
                     ),
                     // Outside the area the anchor writes now: what an earlier
                     // evaluation left there, which nothing writes again.
-                    None => self.stored_value(p),
+                    None => {
+                        let _read = SheetRead::exempt();
+                        self.stored_value(p)
+                    }
                 }
             }
             Content::Formula {
                 array: Some((ArrayKind::Dynamic, _)),
                 ..
-            } => self.stored_value(p),
+            } => {
+                let _read = SheetRead::exempt();
+                self.stored_value(p)
+            }
             // An orphan: its anchor is gone.
             _ => CalcResult::EmptyCell,
         }
@@ -109,9 +116,10 @@ impl Model<'_> {
     /// `content(p)`, made from the sheet the first time it is read.
     pub(crate) fn incr_content(&mut self, p: CellReferenceIndex) -> Content {
         let state = self.incr_state();
-        let handle = state
-            .content
-            .get_or_insert_input(&state.rt, key(p), || self.content_on_sheet(p));
+        let handle = state.content.get_or_insert_input(&state.rt, key(p), || {
+            let _read = SheetRead::tracked();
+            self.content_on_sheet(p)
+        });
         state.rt.get(handle)
     }
 
@@ -173,7 +181,11 @@ impl Model<'_> {
 
     /// The fallback of `value(p)` when it is found on a cycle.
     fn incr_circular(&mut self, p: CellReferenceIndex) -> Computed {
+        // `incr_compute` read `content(p)` before `value(p)` could be found
+        // on a cycle.
+        let read = SheetRead::tracked();
         let cell = self.fetch_cell(p).as_deref().and_then(FormulaCell::of);
+        drop(read);
         match cell {
             Some(cell) => self.incr_computed(p, cell, &circular_reference(p)),
             None => Computed {
@@ -212,7 +224,7 @@ impl Model<'_> {
     /// Depends on the tiles a read of a row from `first_column` to
     /// `last_column` covers.
     pub(crate) fn incr_read_tiles(
-        &mut self,
+        &self,
         sheet: u32,
         row: i32,
         first_column: i32,
@@ -233,6 +245,7 @@ impl Model<'_> {
     pub(crate) fn incr_read_dimension(&mut self, sheet: u32) {
         let state = self.incr_state();
         let handle = state.dimension.get_or_insert_input(&state.rt, sheet, || {
+            let _read = SheetRead::tracked();
             self.workbook
                 .worksheet(sheet)
                 .map(|worksheet| {

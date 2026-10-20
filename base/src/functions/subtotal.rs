@@ -80,7 +80,7 @@ impl<'a> Model<'a> {
 
     // FIXME(TD): This is too much
     fn cell_is_subtotal(&mut self, sheet_index: u32, row: i32, column: i32) -> bool {
-        self.note_content_read(CellReferenceIndex {
+        let _read = self.note_content_read(CellReferenceIndex {
             sheet: sheet_index,
             row,
             column,

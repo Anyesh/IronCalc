@@ -124,6 +124,7 @@ fn main() {
     let dest = Path::new(&out_dir).join("generated_tests.rs");
 
     let mut code = String::new();
+    let mut incr_code = String::new();
 
     for cfg in FOLDERS {
         // Tell Cargo to re-run this script if the top-level directory changes.
@@ -142,6 +143,22 @@ fn main() {
 
         for (fn_suffix, file_path) in files {
             let fn_name = format!("{}_{}", cfg.prefix, fn_suffix);
+            writeln!(
+                incr_code,
+                r#"#[allow(non_snake_case)]
+#[test]
+fn lockstep_{fn_name}() {{
+    ironcalc::compare::test_lockstep("{file_path}").unwrap_or_else(|e| panic!("{{}}", e));
+}}
+
+#[allow(non_snake_case)]
+#[test]
+fn read_path_{fn_name}() {{
+    ironcalc::compare::test_read_path("{file_path}");
+}}
+"#
+            )
+            .unwrap();
 
             if cfg.test_save {
                 writeln!(
@@ -179,4 +196,9 @@ fn {fn_name}() {{
     }
 
     fs::write(&dest, code).expect("failed to write generated_tests.rs");
+    fs::write(
+        Path::new(&out_dir).join("generated_incr_tests.rs"),
+        incr_code,
+    )
+    .expect("failed to write generated_incr_tests.rs");
 }

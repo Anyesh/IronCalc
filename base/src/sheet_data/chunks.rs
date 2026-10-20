@@ -57,8 +57,17 @@ impl Chunk {
 }
 
 /// The chunk and the place in it of a row, if the row is within the sheet.
+/// Every read and write of a sheet's rows goes through here or through
+/// `rows_in_order` and `is_empty`.
+#[inline]
+fn audit() {
+    #[cfg(all(feature = "incr", debug_assertions))]
+    crate::incr::ctx::audit_sheet_read();
+}
+
 #[inline]
 fn locate(row: i32) -> Option<(usize, usize)> {
+    audit();
     if !(1..=LAST_ROW).contains(&row) {
         return None;
     }
@@ -100,6 +109,7 @@ impl SheetData {
 
     /// Every row that exists with its number, in ascending order.
     fn rows_in_order(&self) -> impl Iterator<Item = (i32, &Row)> {
+        audit();
         self.chunks
             .iter()
             .enumerate()
@@ -189,6 +199,7 @@ impl SheetData {
 
     /// True if the sheet has no rows.
     pub fn is_empty(&self) -> bool {
+        audit();
         self.row_count == 0
     }
 

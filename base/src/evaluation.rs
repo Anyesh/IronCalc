@@ -1042,11 +1042,12 @@ impl<'a> Model<'a> {
     /// `position` holds: its formula, or its area as an anchor.
     #[cfg_attr(not(feature = "incr"), allow(unused_variables))]
     #[inline]
-    pub(crate) fn note_content_read(&mut self, position: CellReferenceIndex) {
+    pub(crate) fn note_content_read(&mut self, position: CellReferenceIndex) -> SheetRead {
         #[cfg(feature = "incr")]
         if crate::incr::ctx::is_armed() {
             self.incr_content(position);
         }
+        SheetRead::tracked()
     }
 
     /// Like `note_content_read`, for a read of a row from `first_column` to
@@ -1054,16 +1055,17 @@ impl<'a> Model<'a> {
     #[cfg_attr(not(feature = "incr"), allow(unused_variables))]
     #[inline]
     pub(crate) fn note_row_read(
-        &mut self,
+        &self,
         sheet: u32,
         row: i32,
         first_column: i32,
         last_column: i32,
-    ) {
+    ) -> SheetRead {
         #[cfg(feature = "incr")]
         if crate::incr::ctx::is_armed() {
             self.incr_read_tiles(sheet, row, first_column, last_column);
         }
+        SheetRead::tracked()
     }
 
     /// Like `note_content_read`, for a read of the clock or of a random
@@ -1079,11 +1081,12 @@ impl<'a> Model<'a> {
     /// Like `note_content_read`, for a read of the used area of a sheet.
     #[cfg_attr(not(feature = "incr"), allow(unused_variables))]
     #[inline]
-    pub(crate) fn note_dimension_read(&mut self, sheet: u32) {
+    pub(crate) fn note_dimension_read(&mut self, sheet: u32) -> SheetRead {
         #[cfg(feature = "incr")]
         if crate::incr::ctx::is_armed() {
             self.incr_read_dimension(sheet);
         }
+        SheetRead::tracked()
     }
 
     /// Records that the formula being evaluated depends on every position of a
@@ -1132,7 +1135,7 @@ impl<'a> Model<'a> {
         if !whole_rows && !whole_columns {
             return Ok((row2, column2));
         }
-        self.note_dimension_read(sheet);
+        let _read = self.note_dimension_read(sheet);
         let dimension = self
             .workbook
             .worksheet(sheet)
@@ -1200,6 +1203,33 @@ impl<'a> Model<'a> {
             Restart::SelfContradiction(anchor)
         });
         true
+    }
+}
+
+/// While one is held, a compute of the incremental evaluator may read the
+/// sheet directly, which it may not otherwise (`incr::ctx::audit_sheet_read`).
+/// The `note_*_read` functions hand one out for the read they account for.
+#[must_use]
+pub(crate) struct SheetRead {
+    #[cfg(feature = "incr")]
+    _allowed: crate::incr::ctx::SheetReadAllowed,
+}
+
+impl SheetRead {
+    /// For a read a node accounts for.
+    #[inline]
+    pub(crate) fn tracked() -> SheetRead {
+        SheetRead {
+            #[cfg(feature = "incr")]
+            _allowed: crate::incr::ctx::SheetReadAllowed::new(),
+        }
+    }
+
+    /// For a read a node does not account for, which the static allowlist in
+    /// `test_incr_read_audit` names with the reason it is sound.
+    #[inline]
+    pub(crate) fn exempt() -> SheetRead {
+        SheetRead::tracked()
     }
 }
 

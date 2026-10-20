@@ -1,6 +1,8 @@
 #![allow(clippy::unwrap_used)]
+#![allow(clippy::panic)]
 
 use crate::calc_result::CalcResult;
+use crate::evaluation::SheetRead;
 use crate::expressions::types::CellReferenceIndex;
 use crate::incr::ctx;
 use crate::incr::nodes::{tile_of, Constant, Content};
@@ -116,14 +118,59 @@ fn eval_ctx_hands_out_the_armed_model_and_restores_on_drop() {
     {
         let _outer = ctx::arm(&mut model);
         ctx::with_model(|outer| {
-            outer._set("A1", "3");
+            outer.workbook.name = "outer".to_string();
             let _inner = ctx::arm(outer);
-            ctx::with_model(|inner| inner._set("A2", "4"));
+            ctx::with_model(|inner| inner.workbook.name.push_str(" and inner"));
         });
         assert!(ctx::is_armed());
-        ctx::with_model(|outer| assert_eq!(outer._get_text("A2"), "4"));
+        ctx::with_model(|outer| assert_eq!(outer.workbook.name, "outer and inner"));
     }
     assert!(!ctx::is_armed());
+    assert_eq!(model.workbook.name, "outer and inner");
+}
+
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "read the sheet without a node")]
+fn a_compute_reading_the_sheet_directly_panics() {
+    let mut model = new_empty_model();
+    model._set("A1", "3");
+    let _armed = ctx::arm(&mut model);
+    ctx::with_model(|model| model._get_text("A1"));
+}
+
+#[test]
+fn a_compute_may_read_the_sheet_a_node_accounts_for() {
+    let mut model = new_empty_model();
+    model._set("A1", "3");
+    model.set_incremental(true);
+    let _armed = ctx::arm(&mut model);
+    let text = ctx::with_model(|model| {
+        let _read = model.note_content_read(model._parse_reference("A1"));
+        model._get_text("A1")
+    });
+    assert_eq!(text, "3");
+}
+
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "read the sheet without a node")]
+fn a_nested_compute_does_not_inherit_its_callers_allowance() {
+    let mut model = new_empty_model();
+    model._set("A1", "3");
+    let _armed = ctx::arm(&mut model);
+    ctx::with_model(|outer| {
+        let _read = SheetRead::exempt();
+        let _inner = ctx::arm(outer);
+        ctx::with_model(|inner| inner._get_text("A1"));
+    });
+}
+
+#[test]
+fn reading_the_sheet_outside_a_compute_is_not_audited() {
+    let mut model = new_empty_model();
+    model._set("A1", "3");
+    model.set_incremental(true);
     assert_eq!(model._get_text("A1"), "3");
 }
 
@@ -470,4 +517,18 @@ fn a_chain_of_nested_formulas_fits_a_small_thread() {
         .unwrap()
         .join()
         .unwrap();
+}
+
+#[test]
+fn a_dynamic_anchor_depends_on_the_tiles_of_its_area() {
+    let mut model = new_empty_model();
+    model._set("A1", "=SEQUENCE(3)");
+    model.evaluate();
+    model.set_incremental(true);
+    assert_eq!(incr_text(&mut model, "A1"), number(1.0));
+    edit(&mut model, "A3", "x");
+    assert!(matches!(
+        incr_text(&mut model, "A1"),
+        FormulaValue::Error { .. }
+    ));
 }
