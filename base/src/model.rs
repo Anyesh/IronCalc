@@ -293,6 +293,14 @@ pub struct Model<'a> {
     pub(crate) incr: Option<std::rc::Rc<crate::incr::IncrState>>,
 }
 
+/// The style of a spill cell a plan writes at `(row, column)`. A compute of
+/// the incremental evaluator keeps a plan's values alone, so its read of the
+/// style is exempt from the read audit.
+fn spill_style(worksheet: &Worksheet, row: i32, column: i32) -> i32 {
+    let _read = SheetRead::exempt();
+    worksheet.get_style(row, column)
+}
+
 /// Formula text to index in `Worksheet::shared_formulas`, for one sheet.
 #[derive(Default)]
 pub(crate) struct SharedFormulaLookup {
@@ -1105,15 +1113,11 @@ impl<'a> Model<'a> {
                                     Some(node) => array_node_to_spill_value(node),
                                     None => SpillValue::Error(Error::VALUE),
                                 };
-                                // A compute keeps the values alone.
-                                let read = SheetRead::exempt();
-                                let s = worksheet.get_style(r, c);
-                                drop(read);
                                 plan.spills.push((
                                     r,
                                     c,
                                     Cell::SpillCell {
-                                        s,
+                                        s: spill_style(worksheet, r, c),
                                         a: (row, column),
                                         v: sv,
                                     },
@@ -1242,7 +1246,7 @@ impl<'a> Model<'a> {
                         c,
                         Cell::SpillCell {
                             a: (row, column),
-                            s: worksheet.get_style(r, c),
+                            s: spill_style(worksheet, r, c),
                             v: spill_value.clone(),
                         },
                     ));
@@ -1355,16 +1359,12 @@ impl<'a> Model<'a> {
                         v: array_node_to_formula_value(value),
                     });
                 } else {
-                    // A compute keeps the values alone.
-                    let read = SheetRead::exempt();
-                    let s = worksheet.get_style(r, c);
-                    drop(read);
                     plan.spills.push((
                         r,
                         c,
                         Cell::SpillCell {
                             a: (row, column),
-                            s,
+                            s: spill_style(worksheet, r, c),
                             v: array_node_to_spill_value(value),
                         },
                     ));

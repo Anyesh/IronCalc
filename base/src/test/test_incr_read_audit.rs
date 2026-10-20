@@ -48,8 +48,7 @@ const SHIPPED: &str = "the shipped engine's path; evaluate_cell returns before i
 const DISCARDED: &str = "SheetRead::exempt: a compute drops what it reads (styles, clears)";
 const SPILL_FALLBACK: &str =
     "SheetRead::exempt in incr_read_spill: what an earlier run left where no anchor writes now";
-const SPILL_AREA: &str =
-    "the occupancy of a dynamic spill: tiles of each row; its styles: SheetRead::exempt";
+const SPILL_AREA: &str = "the occupancy of a dynamic spill: the tiles of each row of its area";
 const FORMULA_TEXT: &str = "ISFORMULA and FORMULATEXT note the content first; edits otherwise";
 const PRIMITIVE: &str = "the read itself; each caller is on this list";
 
@@ -109,8 +108,7 @@ const ALLOWED: &[(&str, &str, usize, &str)] = &[
     ("model.rs", "get_style_for_cell", 1, NOT_A_COMPUTE),
     ("model.rs", "is_empty_cell", 2, NOT_A_COMPUTE),
     ("model.rs", "own_spill_cells_outside", 1, DISCARDED),
-    ("model.rs", "plan_dynamic_spill", 2, SPILL_AREA),
-    ("model.rs", "plan_result", 2, DISCARDED),
+    ("model.rs", "plan_dynamic_spill", 1, SPILL_AREA),
     ("model.rs", "prepare_cell_for_user_input", 3, NOT_A_COMPUTE),
     ("model.rs", "range_clear_all", 2, NOT_A_COMPUTE),
     ("model.rs", "range_clear_contents", 1, NOT_A_COMPUTE),
@@ -118,6 +116,7 @@ const ALLOWED: &[(&str, &str, usize, &str)] = &[
     ("model.rs", "reset_dynamic_array_spills", 2, NOT_A_COMPUTE),
     ("model.rs", "set_user_array_formula", 2, NOT_A_COMPUTE),
     ("model.rs", "set_user_input", 2, NOT_A_COMPUTE),
+    ("model.rs", "spill_style", 1, DISCARDED),
 ];
 
 /// The lines of `source` that read the sheet, by the function they are in.
