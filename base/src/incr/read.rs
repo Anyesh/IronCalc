@@ -18,6 +18,7 @@ use crate::model::Model;
 use crate::types::{ArrayKind, Cell, FormulaValue};
 
 impl Model<'_> {
+    #[allow(clippy::expect_used)]
     fn incr_state(&self) -> Rc<IncrState> {
         Rc::clone(
             self.incr

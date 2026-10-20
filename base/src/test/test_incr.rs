@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used)]
+#![allow(clippy::panic)]
 
 use crate::calc_result::CalcResult;
 use crate::expressions::types::CellReferenceIndex;
