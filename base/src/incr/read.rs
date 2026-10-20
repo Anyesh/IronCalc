@@ -236,6 +236,11 @@ impl Model<'_> {
         state.rt.get(handle);
     }
 
+    pub(crate) fn incr_read_epoch(&mut self) {
+        let state = self.incr_state();
+        state.rt.get(state.epoch);
+    }
+
     /// What the cell at `p` holds when the incremental evaluator computes
     /// it, without writing anything.
     #[cfg_attr(not(test), allow(dead_code))]

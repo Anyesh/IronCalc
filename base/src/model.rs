@@ -275,6 +275,8 @@ pub struct Model<'a> {
     pub(crate) last_lambda_id: usize,
     /// Everything the evaluation algorithm needs besides the workbook. See `evaluation.rs`.
     pub(crate) evaluation: Evaluation,
+    /// What the volatile functions drew in the current recalc.
+    pub(crate) volatile: crate::volatile::VolatileLog,
     /// Evaluated CF results per cell, keyed by (sheet_index, row, column).
     /// Rebuilt from scratch on every call to evaluate_conditional_formatting().
     pub(crate) cf_cache: HashMap<(u32, i32, i32), Vec<CfCellResult>>,
@@ -1899,6 +1901,7 @@ impl<'a> Model<'a> {
             last_variable_id: 0,
             lambdas: HashMap::new(),
             last_lambda_id: 0,
+            volatile: Default::default(),
             evaluation: Evaluation::default(),
             cf_cache: HashMap::new(),
             links: HashMap::new(),

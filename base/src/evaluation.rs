@@ -504,6 +504,7 @@ impl<'a> Model<'a> {
     /// `#CIRC!` and keeps no spill cells: its stale cells are dropped when it
     /// is marked, so there is nothing of it to read or to contradict.
     pub fn evaluate(&mut self) {
+        self.volatile.clear();
         self.sync_anchor_order();
         // Every pass starts from the same sheet: what an abandoned pass wrote
         // is undone. This is what makes a pass a function of the anchor order.
@@ -965,6 +966,7 @@ impl<'a> Model<'a> {
         cell_reference: CellReferenceIndex,
         formula: i32,
     ) -> CalcResult {
+        self.start_formula_run(cell_reference);
         // Shares the formula, it does not copy it.
         let node =
             Arc::clone(&self.parsed_formulas[cell_reference.sheet as usize][formula as usize].0);
@@ -1052,6 +1054,16 @@ impl<'a> Model<'a> {
         #[cfg(feature = "incr")]
         if crate::incr::ctx::is_armed() {
             self.incr_read_tiles(sheet, row, first_column, last_column);
+        }
+    }
+
+    /// Like `note_content_read`, for a read of the clock or of a random
+    /// number, which a new recalc changes.
+    #[inline]
+    pub(crate) fn note_epoch_read(&mut self) {
+        #[cfg(feature = "incr")]
+        if crate::incr::ctx::is_armed() {
+            self.incr_read_epoch();
         }
     }
 

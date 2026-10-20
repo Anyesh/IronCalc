@@ -8,7 +8,7 @@ mod read;
 
 use std::rc::Rc;
 
-use incr_compute::{NodeTable, Runtime};
+use incr_compute::{Incr, NodeTable, Runtime};
 
 use crate::model::Model;
 use crate::types::FormulaValue;
@@ -29,6 +29,8 @@ pub(crate) struct IncrState {
     /// A version per 64×64 block, bumped when a cell of the block changes.
     pub(crate) tile: NodeTable<Position, u64>,
     pub(crate) dimension: NodeTable<u32, Dimension>,
+    /// Bumped on every recalc; read by the volatile functions.
+    pub(crate) epoch: Incr<u64>,
 }
 
 impl IncrState {
@@ -49,6 +51,7 @@ impl IncrState {
             value: rt.create_table(),
             tile: rt.create_table(),
             dimension: rt.create_table(),
+            epoch: rt.create_input(0),
             rt,
         }
     }

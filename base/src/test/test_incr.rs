@@ -365,3 +365,24 @@ fn subtotal_depends_on_which_cells_are_subtotals() {
     edit(&mut model, "A2", "=SUM(A1)");
     assert_eq!(incr_text(&mut model, "B1"), number(2.0));
 }
+
+#[test]
+fn volatile_cells_share_the_reference_draws_and_rerun_on_a_new_epoch() {
+    let mut model = new_empty_model();
+    model._set("A1", "=RAND()");
+    model._set("B1", "=NOW()");
+    model.set_incremental(true);
+    crate::mock_time::set_mock_time(1_700_000_000_000);
+    for _ in 0..2 {
+        model.evaluate();
+        for cell in ["A1", "B1"] {
+            let Cell::CellFormula { v, .. } = model._get_cell(cell) else {
+                panic!("{cell} is not a formula");
+            };
+            assert_eq!(incr_text(&mut model, cell), v, "{cell}");
+        }
+        let state = model.incr.clone().unwrap();
+        state.rt.set(state.epoch, state.rt.get(state.epoch) + 1);
+        crate::mock_time::set_mock_time(1_700_086_400_000);
+    }
+}

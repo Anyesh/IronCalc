@@ -1297,6 +1297,7 @@ impl<'a> Model<'a> {
 
     // Extends the standard by adding an optional timezone parameter
     pub(crate) fn fn_today(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
+        self.note_epoch_read();
         if args.len() > 1 {
             return CalcResult::Error {
                 error: Error::ERROR,
@@ -1337,6 +1338,7 @@ impl<'a> Model<'a> {
 
     // Extends the standard by adding an optional timezone parameter
     pub(crate) fn fn_now(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
+        self.note_epoch_read();
         if args.len() > 1 {
             return CalcResult::Error {
                 error: Error::ERROR,

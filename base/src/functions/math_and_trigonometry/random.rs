@@ -5,23 +5,12 @@ use crate::{
     calc_result::CalcResult, expressions::parser::Node, expressions::token::Error, model::Model,
 };
 
-#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-fn random() -> f64 {
-    rand::random()
-}
-
-#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-fn random() -> f64 {
-    use js_sys::Math;
-    Math::random()
-}
-
 impl<'a> Model<'a> {
     pub(crate) fn fn_rand(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
         if !args.is_empty() {
             return CalcResult::new_args_number_error(cell);
         }
-        CalcResult::Number(random())
+        CalcResult::Number(self.draw_random(cell))
     }
 
     // TODO: Add tests for RANDBETWEEN
@@ -44,7 +33,7 @@ impl<'a> Model<'a> {
                 message: format!("{x}>{y}"),
             };
         }
-        CalcResult::Number((x + random() * (y - x)).floor())
+        CalcResult::Number((x + self.draw_random(cell) * (y - x)).floor())
     }
 
     /// `=RANDARRAY([rows], [cols], [min], [max], [whole_number])`
@@ -176,9 +165,9 @@ impl<'a> Model<'a> {
                     let min_int = min.floor();
                     let max_int = max.floor();
                     let span = max_int - min_int + 1.0;
-                    min_int + (random() * span).floor()
+                    min_int + (self.draw_random(cell) * span).floor()
                 } else {
-                    min + random() * (max - min)
+                    min + self.draw_random(cell) * (max - min)
                 };
                 row.push(ArrayNode::Number(val));
             }
