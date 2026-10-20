@@ -40,6 +40,14 @@ const READS: &[&str] = &[
     "get_cell_spill(",
     "get_cell_structure(",
     "column_cell_references(",
+    "get_style_for_cell(",
+    "get_cell_style_index(",
+    "get_cell_style_or_none(",
+    "get_cell_type(",
+    "get_cell_value_by_index(",
+    "get_formatted_cell_value(",
+    "get_localized_cell_content(",
+    "merged_cell_containing(",
 ];
 
 const TRACKED: &str = "a note_*_read or SheetRead::tracked accounts for it";
@@ -48,7 +56,8 @@ const SHIPPED: &str = "the shipped engine's path; evaluate_cell returns before i
 const DISCARDED: &str = "SheetRead::exempt: a compute drops what it reads (styles, clears)";
 const SPILL_FALLBACK: &str =
     "SheetRead::exempt in incr_read_spill: what an earlier run left where no anchor writes now";
-const SPILL_AREA: &str = "the occupancy of a dynamic spill: the tiles of each row of its area";
+const SPILL_AREA: &str =
+    "a dynamic spill's area: the tiles of each row; its merges: the metadata fingerprint";
 const FORMULA_TEXT: &str = "ISFORMULA and FORMULATEXT note the content first; edits otherwise";
 const PRIMITIVE: &str = "the read itself; each caller is on this list";
 
@@ -95,28 +104,34 @@ const ALLOWED: &[(&str, &str, usize, &str)] = &[
     ("model.rs", "get_all_cells", 1, NOT_A_COMPUTE),
     ("model.rs", "get_cell_formula", 2, FORMULA_TEXT),
     ("model.rs", "get_cell_structure", 2, NOT_A_COMPUTE),
-    ("model.rs", "get_cell_style_index", 2, NOT_A_COMPUTE),
-    ("model.rs", "get_cell_style_or_none", 2, NOT_A_COMPUTE),
-    ("model.rs", "get_cell_type", 1, NOT_A_COMPUTE),
-    ("model.rs", "get_cell_value_by_index", 1, NOT_A_COMPUTE),
+    ("model.rs", "get_cell_style_index", 3, NOT_A_COMPUTE),
+    ("model.rs", "get_cell_style_or_none", 3, NOT_A_COMPUTE),
+    ("model.rs", "get_cell_type", 2, NOT_A_COMPUTE),
+    ("model.rs", "get_cell_value_by_index", 2, NOT_A_COMPUTE),
     ("model.rs", "get_column_style", 1, NOT_A_COMPUTE),
     ("model.rs", "get_english_cell_formula", 2, FORMULA_TEXT),
-    ("model.rs", "get_formatted_cell_value", 1, NOT_A_COMPUTE),
-    ("model.rs", "get_localized_cell_content", 3, NOT_A_COMPUTE),
+    ("model.rs", "get_formatted_cell_value", 3, NOT_A_COMPUTE),
+    ("model.rs", "get_localized_cell_content", 4, NOT_A_COMPUTE),
     ("model.rs", "get_row_style", 1, NOT_A_COMPUTE),
-    ("model.rs", "get_sheet_markup", 2, NOT_A_COMPUTE),
-    ("model.rs", "get_style_for_cell", 1, NOT_A_COMPUTE),
+    ("model.rs", "get_sheet_markup", 4, NOT_A_COMPUTE),
+    ("model.rs", "get_style_for_cell", 3, NOT_A_COMPUTE),
     ("model.rs", "is_empty_cell", 2, NOT_A_COMPUTE),
     ("model.rs", "own_spill_cells_outside", 1, DISCARDED),
-    ("model.rs", "plan_dynamic_spill", 1, SPILL_AREA),
+    ("model.rs", "plan_dynamic_spill", 2, SPILL_AREA),
     ("model.rs", "prepare_cell_for_user_input", 3, NOT_A_COMPUTE),
     ("model.rs", "range_clear_all", 2, NOT_A_COMPUTE),
     ("model.rs", "range_clear_contents", 1, NOT_A_COMPUTE),
     ("model.rs", "read_constants", 1, TRACKED),
     ("model.rs", "reset_dynamic_array_spills", 2, NOT_A_COMPUTE),
-    ("model.rs", "set_user_array_formula", 2, NOT_A_COMPUTE),
-    ("model.rs", "set_user_input", 2, NOT_A_COMPUTE),
+    ("model.rs", "set_user_array_formula", 4, NOT_A_COMPUTE),
+    ("model.rs", "set_user_input", 3, NOT_A_COMPUTE),
     ("model.rs", "spill_style", 1, DISCARDED),
+    ("model.rs", "get_cell_value_by_ref", 1, NOT_A_COMPUTE),
+    ("model.rs", "update_cell_with_bool", 1, NOT_A_COMPUTE),
+    ("model.rs", "update_cell_with_formula", 1, NOT_A_COMPUTE),
+    ("model.rs", "update_cell_with_number", 1, NOT_A_COMPUTE),
+    ("model.rs", "update_cell_with_text", 1, NOT_A_COMPUTE),
+    ("units.rs", "compute_cell_units", 1, NOT_A_COMPUTE),
 ];
 
 /// The lines of `source` that read the sheet, by the function they are in.

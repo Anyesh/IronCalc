@@ -130,6 +130,7 @@ fn eval_ctx_hands_out_the_armed_model_and_restores_on_drop() {
 }
 
 #[test]
+#[cfg(debug_assertions)]
 #[should_panic(expected = "read the sheet without a node")]
 fn a_compute_reading_the_sheet_directly_panics() {
     let mut model = new_empty_model();
@@ -152,6 +153,7 @@ fn a_compute_may_read_the_sheet_a_node_accounts_for() {
 }
 
 #[test]
+#[cfg(debug_assertions)]
 #[should_panic(expected = "read the sheet without a node")]
 fn a_nested_compute_does_not_inherit_its_callers_allowance() {
     let mut model = new_empty_model();
