@@ -6,6 +6,9 @@ pub(crate) mod ctx;
 pub(crate) mod nodes;
 mod read;
 
+#[cfg(test)]
+mod miri_tests;
+
 use std::cell::Cell;
 use std::rc::Rc;
 
