@@ -58,6 +58,8 @@ mod test_gcd_lcm;
 mod test_general;
 #[cfg(feature = "incr")]
 mod test_incr;
+#[cfg(feature = "incr")]
+mod test_incr_read_audit;
 mod test_inverted_ranges;
 mod test_issue_623;
 mod test_math;

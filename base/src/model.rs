@@ -37,7 +37,7 @@ use crate::{
     utils as common,
 };
 
-use crate::evaluation::{CellKey, Evaluation, FormulaCell, Seen};
+use crate::evaluation::{CellKey, Evaluation, FormulaCell, Seen, SheetRead};
 use crate::{cf_types::CfCellResult, tz::Tz};
 
 #[cfg(any(test, feature = "mock_time"))]
@@ -940,7 +940,7 @@ impl<'a> Model<'a> {
                             "Circular reference detected".to_string(),
                         );
                     }
-                    self.note_content_read(left);
+                    let _read = self.note_content_read(left);
                     let sheet = left.sheet;
                     let row = left.row;
                     let column = left.column;
@@ -1105,11 +1105,15 @@ impl<'a> Model<'a> {
                                     Some(node) => array_node_to_spill_value(node),
                                     None => SpillValue::Error(Error::VALUE),
                                 };
+                                // A compute keeps the values alone.
+                                let read = SheetRead::exempt();
+                                let s = worksheet.get_style(r, c);
+                                drop(read);
                                 plan.spills.push((
                                     r,
                                     c,
                                     Cell::SpillCell {
-                                        s: worksheet.get_style(r, c),
+                                        s,
                                         a: (row, column),
                                         v: sv,
                                     },
@@ -1305,6 +1309,7 @@ impl<'a> Model<'a> {
         let mut blocked = false;
         let mut occupied_by_other_spills = Vec::new();
         for r in row..row + height {
+            let _read = self.note_row_read(sheet, r, column, column + width - 1);
             for c in column..column + width {
                 if (r, c) == (row, column) {
                     continue;
@@ -1350,12 +1355,16 @@ impl<'a> Model<'a> {
                         v: array_node_to_formula_value(value),
                     });
                 } else {
+                    // A compute keeps the values alone.
+                    let read = SheetRead::exempt();
+                    let s = worksheet.get_style(r, c);
+                    drop(read);
                     plan.spills.push((
                         r,
                         c,
                         Cell::SpillCell {
                             a: (row, column),
-                            s: worksheet.get_style(r, c),
+                            s,
                             v: array_node_to_spill_value(value),
                         },
                     ));
@@ -1421,6 +1430,8 @@ impl<'a> Model<'a> {
     ) -> Result<Vec<CellKey>, String> {
         let CellReferenceIndex { sheet, row, column } = anchor;
         let worksheet = self.workbook.worksheet(sheet)?;
+        // What this finds goes to the plan's clears, which a compute drops.
+        let _read = SheetRead::exempt();
         let mut cells = Vec::new();
         for r in row..row + old_area.1 {
             for c in column..column + old_area.0 {
@@ -1642,7 +1653,7 @@ impl<'a> Model<'a> {
             // A row the sheet holds as numbers is copied as it is. Not while
             // the pass is being abandoned: nothing read then is a value.
             if self.evaluation.restart.is_none() && !self.evaluation.unwinding {
-                self.note_row_read(left.sheet, row, left.column, right.column);
+                let _read = self.note_row_read(left.sheet, row, left.column, right.column);
                 let sheet_data = &self.workbook.worksheets[left.sheet as usize].sheet_data;
                 if let Some(row_numbers) =
                     sheet_data.numbers_in_row_between(row, left.column, right.column)
@@ -1678,7 +1689,7 @@ impl<'a> Model<'a> {
         last_column: i32,
         push: &mut impl FnMut(ArrayNode),
     ) {
-        self.note_row_read(sheet, row, first_column, last_column);
+        let _read = self.note_row_read(sheet, row, first_column, last_column);
         let mut column = first_column;
         while column <= last_column {
             // Constants are read straight from the sheet; what is left,
