@@ -11,15 +11,11 @@ use incr_compute::{CycleStrategy, QueryOpts, Replay};
 use super::nodes::{tile_of, Computed, Constant, Content, Dimension};
 use super::{ctx, IncrState};
 use crate::calc_result::CalcResult;
-use crate::evaluation::{circular_reference, FormulaCell};
+use crate::evaluation::{circular_reference, key, FormulaCell};
 use crate::expressions::token::Error;
 use crate::expressions::types::CellReferenceIndex;
 use crate::model::Model;
 use crate::types::{ArrayKind, Cell, FormulaValue};
-
-fn key(p: CellReferenceIndex) -> (u32, i32, i32) {
-    (p.sheet, p.row, p.column)
-}
 
 impl Model<'_> {
     fn incr_state(&self) -> Rc<IncrState> {
@@ -64,10 +60,12 @@ impl Model<'_> {
                 ..
             } => {
                 let computed = self.incr_value(anchor_reference);
+                // Spills are in natural order, by row and then by column.
                 let written = computed.spills.as_deref().and_then(|spills| {
-                    spills
-                        .iter()
-                        .find(|(position, _)| *position == (p.row, p.column))
+                    let index = spills
+                        .binary_search_by_key(&(p.row, p.column), |(position, _)| *position)
+                        .ok()?;
+                    spills.get(index)
                 });
                 match written {
                     Some((_, v)) => self.get_cell_value(
@@ -129,7 +127,7 @@ impl Model<'_> {
         )
     }
 
-    /// `value(p)` for the formula at `p`.
+    /// `value(p)`, computed if it is not clean.
     pub(crate) fn incr_value(&mut self, p: CellReferenceIndex) -> Computed {
         let state = self.incr_state();
         let handle = state.value.get_or_insert_query_with(
@@ -164,6 +162,11 @@ impl Model<'_> {
             s: 0,
             array: array.map(|(kind, area)| (kind == ArrayKind::Dynamic, area)),
         };
+        // As in `run_top`: a link an earlier run attached may rest on values
+        // this run does not read.
+        if !self.links.is_empty() {
+            self.links.remove(&key(p));
+        }
         let result = self.compute_formula(p, f);
         self.incr_computed(p, cell, &result)
     }
@@ -191,7 +194,12 @@ impl Model<'_> {
                 let (v, spills) = plan.into_values();
                 Computed {
                     v: v.unwrap_or(FormulaValue::Unevaluated),
-                    spills: (!spills.is_empty()).then(|| spills.into()),
+                    spills: (!spills.is_empty()).then(|| {
+                        spills
+                            .into_iter()
+                            .map(|(row, column, v)| ((row, column), v))
+                            .collect()
+                    }),
                 }
             }
             Err(message) => Computed {
@@ -246,6 +254,6 @@ impl Model<'_> {
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn incr_cell_value(&mut self, p: CellReferenceIndex) -> CalcResult {
         let _armed = ctx::arm(self);
-        self.incr_read(p)
+        ctx::with_model(|model| model.incr_read(p))
     }
 }

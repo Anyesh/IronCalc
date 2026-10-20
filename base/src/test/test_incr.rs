@@ -386,3 +386,42 @@ fn volatile_cells_share_the_reference_draws_and_rerun_on_a_new_epoch() {
         crate::mock_time::set_mock_time(1_700_086_400_000);
     }
 }
+
+#[test]
+fn a_run_that_attaches_no_link_drops_the_one_an_earlier_run_attached() {
+    let mut model = new_empty_model();
+    model._set("B1", "TRUE");
+    model._set(
+        "A1",
+        "=IF(B1,HYPERLINK(\"https://example.com\",\"x\"),\"no\")",
+    );
+    model.set_incremental(true);
+    incr_text(&mut model, "A1");
+    assert!(model.links.contains_key(&(0, 1, 1)));
+    edit(&mut model, "B1", "FALSE");
+    assert_eq!(
+        incr_text(&mut model, "A1"),
+        FormulaValue::Text("no".to_string())
+    );
+    assert!(!model.links.contains_key(&(0, 1, 1)));
+}
+
+#[test]
+fn a_run_of_a_formula_draws_what_its_earlier_runs_drew() {
+    let a1 = CellReferenceIndex {
+        sheet: 0,
+        row: 1,
+        column: 1,
+    };
+    let mut model = new_empty_model();
+    model.set_incremental(true);
+    model.start_formula_run(a1);
+    let first = (model.draw_random(a1), model.draw_random(a1));
+    assert_ne!(first.0, first.1);
+    model.start_formula_run(a1);
+    assert_eq!((model.draw_random(a1), model.draw_random(a1)), first);
+    // a new recalc draws afresh
+    model.volatile.clear();
+    model.start_formula_run(a1);
+    assert_ne!(model.draw_random(a1), first.0);
+}

@@ -215,7 +215,7 @@ impl ResultPlan {
     /// The value the formula cell stores, if it is written, and the value of
     /// each spill cell written, by row and column.
     #[cfg(feature = "incr")]
-    pub(crate) fn into_values(self) -> (Option<FormulaValue>, Vec<crate::incr::nodes::SpillWrite>) {
+    pub(crate) fn into_values(self) -> (Option<FormulaValue>, Vec<(i32, i32, SpillValue)>) {
         let v = match self.cell {
             Some(Cell::CellFormula { v, .. } | Cell::ArrayFormula { v, .. }) => Some(v),
             _ => None,
@@ -224,7 +224,7 @@ impl ResultPlan {
             .spills
             .into_iter()
             .filter_map(|(row, column, cell)| match cell {
-                Cell::SpillCell { v, .. } => Some(((row, column), v)),
+                Cell::SpillCell { v, .. } => Some((row, column, v)),
                 _ => None,
             })
             .collect();
@@ -1678,6 +1678,7 @@ impl<'a> Model<'a> {
         last_column: i32,
         push: &mut impl FnMut(ArrayNode),
     ) {
+        self.note_row_read(sheet, row, first_column, last_column);
         let mut column = first_column;
         while column <= last_column {
             // Constants are read straight from the sheet; what is left,
@@ -1727,7 +1728,6 @@ impl<'a> Model<'a> {
         last_column: i32,
         push: &mut impl FnMut(ArrayNode),
     ) -> (i32, i32) {
-        self.note_row_read(sheet, row, column, last_column);
         let evaluation = &mut self.evaluation;
         if evaluation.restart.is_some() || evaluation.unwinding {
             // Nothing read now counts, and nothing is put on record: leave

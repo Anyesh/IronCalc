@@ -1,15 +1,15 @@
-//! The random numbers of a recalc. A formula can run more than once in one
-//! recalc (a restarted pass, a replayed or repeated compute, or the reference
-//! and the incremental evaluator both running it), and each run must draw
-//! what the first one drew, so every draw is kept, by the cell that made it
-//! and how many draws that cell's run had made before it.
+//! The random numbers of a recalc. Under the incremental evaluator a formula
+//! can run more than once in one recalc (a replayed or repeated compute, or
+//! the reference and the incremental evaluator both running it), and each run
+//! must draw what the first one drew, so while the model is incremental every
+//! draw is kept, by the cell that made it and how many draws that cell's run
+//! had made before it.
 
 use std::collections::HashMap;
 
+use crate::evaluation::{key, CellKey};
 use crate::expressions::types::CellReferenceIndex;
 use crate::model::Model;
-
-type CellKey = (u32, i32, i32);
 
 #[derive(Default)]
 pub(crate) struct VolatileLog {
@@ -19,10 +19,9 @@ pub(crate) struct VolatileLog {
 }
 
 impl VolatileLog {
-    /// Starts a new recalc: nothing drawn yet.
+    /// Forgets every draw, and the memory they took.
     pub(crate) fn clear(&mut self) {
-        self.draws.clear();
-        self.runs.clear();
+        *self = VolatileLog::default();
     }
 }
 
@@ -37,10 +36,6 @@ fn random() -> f64 {
     Math::random()
 }
 
-fn key(cell: CellReferenceIndex) -> CellKey {
-    (cell.sheet, cell.row, cell.column)
-}
-
 impl Model<'_> {
     /// A run of the formula at `cell` starts: its next draw is its first.
     #[inline]
@@ -53,6 +48,9 @@ impl Model<'_> {
     /// A random number in [0, 1) for the formula at `cell`.
     pub(crate) fn draw_random(&mut self, cell: CellReferenceIndex) -> f64 {
         self.note_epoch_read();
+        if !self.keeps_draws() {
+            return random();
+        }
         let key = key(cell);
         let count = self.volatile.runs.entry(key).or_insert(0);
         let index = *count;
@@ -62,5 +60,12 @@ impl Model<'_> {
             .draws
             .entry((key, index))
             .or_insert_with(random)
+    }
+
+    fn keeps_draws(&self) -> bool {
+        #[cfg(feature = "incr")]
+        return self.is_incremental();
+        #[cfg(not(feature = "incr"))]
+        false
     }
 }

@@ -81,7 +81,7 @@ pub(crate) type KeyBuild = std::hash::BuildHasherDefault<KeyHasher>;
 /// `(sheet, row, column)`: a position in the workbook.
 pub(crate) type CellKey = (u32, i32, i32);
 
-fn key(cell: CellReferenceIndex) -> CellKey {
+pub(crate) fn key(cell: CellReferenceIndex) -> CellKey {
     (cell.sheet, cell.row, cell.column)
 }
 
