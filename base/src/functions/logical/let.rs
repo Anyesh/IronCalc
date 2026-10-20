@@ -122,6 +122,9 @@ impl<'a> Model<'a> {
             };
 
             if !seen_names.insert(name.clone()) {
+                for id in bound_ids {
+                    self.variable_stack.remove(&id);
+                }
                 return CalcResult::new_error(
                     Error::ERROR,
                     cell,

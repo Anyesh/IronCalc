@@ -77,3 +77,15 @@ fn test_lambda_r_and_c_parameters() {
     model.evaluate();
     assert_eq!(model._get_text("A1"), "7");
 }
+
+#[test]
+fn test_let_leaves_no_binding_behind() {
+    let mut model = new_empty_model();
+    // the second x is refused after the first was bound
+    model._set("A1", "=LET(x,1,x,2,x)");
+    model._set("A2", "=LET(x,1,y,2,x+y)");
+    model.evaluate();
+    assert_eq!(model._get_text("A1"), "#ERROR!");
+    assert_eq!(model._get_text("A2"), "3");
+    assert!(model.variable_stack.is_empty());
+}
