@@ -96,7 +96,7 @@ fn a_difference_is_reported_with_the_steps_that_led_to_it() {
 }
 
 #[test]
-fn random_runs_make_every_kind_of_edit_and_most_are_taken() {
+fn random_runs_make_every_kind_of_edit_and_both_models_take_each() {
     let workbook = || {
         let mut model = two_sheets();
         model._set("A1", "1");
@@ -104,17 +104,15 @@ fn random_runs_make_every_kind_of_edit_and_most_are_taken() {
         model._set("B1", "=SUM(A1:A2)");
         model
     };
-    let mut kinds = std::collections::BTreeSet::new();
-    let (mut made, mut refused) = (0, 0);
+    let mut taken = std::collections::BTreeMap::new();
     for seed in 1..=8 {
         let lockstep = crate::lockstep::run(workbook(), workbook(), seed, 40, None).unwrap();
-        for edit in lockstep.steps() {
+        for (edit, refused) in lockstep.steps().iter().zip(lockstep.refused()) {
             let name = format!("{edit:?}");
-            kinds.insert(name[..name.find('(').unwrap_or(name.len())].to_string());
+            let kind = name[..name.find('(').unwrap_or(name.len())].to_string();
+            *taken.entry(kind).or_insert(0) += usize::from(!refused);
         }
-        made += lockstep.steps().len();
-        refused += lockstep.refused();
     }
-    assert_eq!(kinds.len(), 13, "{kinds:?}");
-    assert!(refused * 5 < made, "{refused} of {made} edits refused");
+    assert_eq!(taken.len(), 13, "{taken:?}");
+    assert!(taken.values().all(|&n| n > 0), "{taken:?}");
 }

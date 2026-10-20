@@ -105,7 +105,8 @@ pub struct Lockstep<'a> {
     incremental: UserModel<'a>,
     reference: UserModel<'a>,
     steps: Vec<Edit>,
-    refused: usize,
+    /// Whether both models refused each of `steps`.
+    refused: Vec<bool>,
 }
 
 impl<'a> Lockstep<'a> {
@@ -128,7 +129,7 @@ impl<'a> Lockstep<'a> {
             incremental: UserModel::from_model(incremental),
             reference: UserModel::from_model(reference),
             steps: Vec::new(),
-            refused: 0,
+            refused: Vec::new(),
         };
         lockstep.compare("the first evaluation")?;
         Ok(lockstep)
@@ -149,9 +150,7 @@ impl<'a> Lockstep<'a> {
                 "the models answered differently: incremental {incremental:?}, reference {reference:?}"
             )));
         }
-        if reference.is_err() {
-            self.refused += 1;
-        }
+        self.refused.push(reference.is_err());
         self.compare("the edit")
     }
 
@@ -160,9 +159,9 @@ impl<'a> Lockstep<'a> {
         &self.steps
     }
 
-    /// How many of the edits both models refused.
-    pub fn refused(&self) -> usize {
-        self.refused
+    /// Whether both models refused each edit of `steps`.
+    pub fn refused(&self) -> &[bool] {
+        &self.refused
     }
 
     fn compare(&self, after: &str) -> Result<(), String> {
@@ -298,7 +297,11 @@ pub fn random_edits(model: &Model, rng: &mut Rng, made: usize) -> Vec<Edit> {
         3 => input("TRUE".to_string()),
         4 | 5 => {
             let a = around.random_name(rng);
-            let b = around.random_name(rng);
+            let names = model.workbook.get_defined_names_with_scope();
+            let b = match names.len() {
+                0 => around.random_name(rng),
+                n => names[rng.below(n as u64) as usize].0.clone(),
+            };
             input(match rng.below(3) {
                 0 => format!("={a}+1"),
                 1 => format!("={a}*{b}"),
@@ -364,7 +367,7 @@ pub fn random_edits(model: &Model, rng: &mut Rng, made: usize) -> Vec<Edit> {
         17 => vec![Edit::DefinedName(
             format!("lockstep{made}"),
             format!(
-                "='{}'!${}${row}",
+                "'{}'!${}${row}",
                 worksheet.name,
                 number_to_column(column).unwrap_or_default()
             ),
