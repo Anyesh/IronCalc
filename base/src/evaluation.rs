@@ -721,6 +721,10 @@ impl<'a> Model<'a> {
     /// not been evaluated in this pass. Reads are performed on behalf of the
     /// cell on top of the stack.
     pub(crate) fn evaluate_cell(&mut self, cell_reference: CellReferenceIndex) -> CalcResult {
+        #[cfg(feature = "incr")]
+        if crate::incr::ctx::is_armed() {
+            return self.incr_read(cell_reference);
+        }
         if self.evaluation.restart.is_some() || self.evaluation.unwinding {
             // The pass is being abandoned, or the recursion is unwinding;
             // nothing computed now is kept. This comes before anything is put
@@ -956,7 +960,11 @@ impl<'a> Model<'a> {
     }
 
     /// Runs the parsed formula and turns a reference into a value or an array.
-    fn compute_formula(&mut self, cell_reference: CellReferenceIndex, formula: i32) -> CalcResult {
+    pub(crate) fn compute_formula(
+        &mut self,
+        cell_reference: CellReferenceIndex,
+        formula: i32,
+    ) -> CalcResult {
         // Shares the formula, it does not copy it.
         let node =
             Arc::clone(&self.parsed_formulas[cell_reference.sheet as usize][formula as usize].0);
@@ -990,7 +998,7 @@ impl<'a> Model<'a> {
     }
 
     /// The value currently stored at a position, empty if there is no cell.
-    fn stored_value(&self, cell_reference: CellReferenceIndex) -> CalcResult {
+    pub(crate) fn stored_value(&self, cell_reference: CellReferenceIndex) -> CalcResult {
         match self.fetch_cell(cell_reference) {
             Some(cell) => self.get_cell_value(&cell, cell_reference),
             None => CalcResult::EmptyCell,
@@ -1016,6 +1024,45 @@ impl<'a> Model<'a> {
     /// a pass are nobody's dependency.
     pub(crate) fn record_seen(&mut self, position: CellReferenceIndex, seen: Seen) {
         self.evaluation.record_seen(position, seen);
+    }
+
+    /// Tells the incremental evaluator, while one of its computes runs, that
+    /// the read of the sheet that follows depends on what the cell at
+    /// `position` holds: its formula, or its area as an anchor.
+    #[cfg_attr(not(feature = "incr"), allow(unused_variables))]
+    #[inline]
+    pub(crate) fn note_content_read(&mut self, position: CellReferenceIndex) {
+        #[cfg(feature = "incr")]
+        if crate::incr::ctx::is_armed() {
+            self.incr_content(position);
+        }
+    }
+
+    /// Like `note_content_read`, for a read of a row from `first_column` to
+    /// `last_column` made straight from the sheet.
+    #[cfg_attr(not(feature = "incr"), allow(unused_variables))]
+    #[inline]
+    pub(crate) fn note_row_read(
+        &mut self,
+        sheet: u32,
+        row: i32,
+        first_column: i32,
+        last_column: i32,
+    ) {
+        #[cfg(feature = "incr")]
+        if crate::incr::ctx::is_armed() {
+            self.incr_read_tiles(sheet, row, first_column, last_column);
+        }
+    }
+
+    /// Like `note_content_read`, for a read of the used area of a sheet.
+    #[cfg_attr(not(feature = "incr"), allow(unused_variables))]
+    #[inline]
+    pub(crate) fn note_dimension_read(&mut self, sheet: u32) {
+        #[cfg(feature = "incr")]
+        if crate::incr::ctx::is_armed() {
+            self.incr_read_dimension(sheet);
+        }
     }
 
     /// Records that the formula being evaluated depends on every position of a
@@ -1064,6 +1111,7 @@ impl<'a> Model<'a> {
         if !whole_rows && !whole_columns {
             return Ok((row2, column2));
         }
+        self.note_dimension_read(sheet);
         let dimension = self
             .workbook
             .worksheet(sheet)
@@ -1134,7 +1182,7 @@ impl<'a> Model<'a> {
     }
 }
 
-fn circular_reference(cell_reference: CellReferenceIndex) -> CalcResult {
+pub(crate) fn circular_reference(cell_reference: CellReferenceIndex) -> CalcResult {
     CalcResult::new_error(
         Error::CIRC,
         cell_reference,

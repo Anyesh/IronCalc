@@ -211,6 +211,25 @@ impl ResultPlan {
             clears: Vec::new(),
         }
     }
+
+    /// The value the formula cell stores, if it is written, and the value of
+    /// each spill cell written, by row and column.
+    #[cfg(feature = "incr")]
+    pub(crate) fn into_values(self) -> (Option<FormulaValue>, Vec<crate::incr::nodes::SpillWrite>) {
+        let v = match self.cell {
+            Some(Cell::CellFormula { v, .. } | Cell::ArrayFormula { v, .. }) => Some(v),
+            _ => None,
+        };
+        let spills = self
+            .spills
+            .into_iter()
+            .filter_map(|(row, column, cell)| match cell {
+                Cell::SpillCell { v, .. } => Some(((row, column), v)),
+                _ => None,
+            })
+            .collect();
+        (v, spills)
+    }
 }
 
 /// A dynamical IronCalc model.
@@ -919,6 +938,7 @@ impl<'a> Model<'a> {
                             "Circular reference detected".to_string(),
                         );
                     }
+                    self.note_content_read(left);
                     let sheet = left.sheet;
                     let row = left.row;
                     let column = left.column;
@@ -1620,6 +1640,7 @@ impl<'a> Model<'a> {
             // A row the sheet holds as numbers is copied as it is. Not while
             // the pass is being abandoned: nothing read then is a value.
             if self.evaluation.restart.is_none() && !self.evaluation.unwinding {
+                self.note_row_read(left.sheet, row, left.column, right.column);
                 let sheet_data = &self.workbook.worksheets[left.sheet as usize].sheet_data;
                 if let Some(row_numbers) =
                     sheet_data.numbers_in_row_between(row, left.column, right.column)
@@ -1704,6 +1725,7 @@ impl<'a> Model<'a> {
         last_column: i32,
         push: &mut impl FnMut(ArrayNode),
     ) -> (i32, i32) {
+        self.note_row_read(sheet, row, column, last_column);
         let evaluation = &mut self.evaluation;
         if evaluation.restart.is_some() || evaluation.unwinding {
             // Nothing read now counts, and nothing is put on record: leave

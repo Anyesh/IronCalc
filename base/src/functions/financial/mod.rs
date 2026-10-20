@@ -233,6 +233,7 @@ impl<'a> Model<'a> {
                 let column1 = left.column;
                 let mut column2 = right.column;
                 if row1 == 1 && row2 == LAST_ROW {
+                    self.note_dimension_read(sheet);
                     row2 = self
                         .workbook
                         .worksheet(sheet)
@@ -247,6 +248,7 @@ impl<'a> Model<'a> {
                         .max_row;
                 }
                 if column1 == 1 && column2 == LAST_COLUMN {
+                    self.note_dimension_read(sheet);
                     column2 = self
                         .workbook
                         .worksheet(sheet)
