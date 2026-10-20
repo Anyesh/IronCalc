@@ -2,6 +2,12 @@
 //! is the shipped engine, which stays the reference the incremental results
 //! are checked against.
 
+// Read by the read path, which waits for the plan/apply split of the writeback.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod ctx;
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod nodes;
+
 use std::rc::Rc;
 
 use crate::model::Model;
