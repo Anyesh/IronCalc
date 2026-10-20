@@ -5,7 +5,7 @@ use std::borrow::Cow;
 use super::row::Row;
 use super::*;
 use crate::constants::LAST_ROW;
-use crate::types::Cell;
+use crate::types::{ArrayKind, Cell, FormulaValue, SpillValue};
 
 fn number(v: f64) -> Cell {
     Cell::NumberCell { v, s: 0 }
@@ -400,4 +400,132 @@ fn equality_is_about_cells_not_about_chunks() {
     assert_eq!(a, b);
     b.set_cell(1, 2, number(1.0));
     assert_ne!(a, b);
+}
+
+#[test]
+fn changes_are_not_logged_unless_asked() {
+    let mut data = SheetData::new();
+    data.set_cell(1, 1, number(1.0));
+    data.set_row(2, vec![(1, number(2.0))]);
+    assert!(data.changes().is_empty());
+    data.log_changes(true);
+    data.set_cell(1, 1, number(3.0));
+    assert_eq!(data.changes(), [Change::Cell { row: 1, column: 1 }]);
+    // turning the log off forgets it
+    data.log_changes(false);
+    data.set_cell(1, 1, number(4.0));
+    assert!(data.changes().is_empty());
+}
+
+#[test]
+fn every_mutator_logs_what_it_may_change() {
+    let mut data = SheetData::new();
+    data.log_changes(true);
+    data.set_cell(3, 2, number(1.0));
+    *data.cell_mut(3, 2).unwrap() = number(2.0);
+    assert!(data.cell_mut(3, 7).is_none());
+    // the last cell of the row takes the row with it, which is not a change
+    // of the row
+    data.remove_cell(3, 2);
+    assert_eq!(data.remove_cell(3, 2), None);
+    data.set_row(5, vec![(1, number(1.0))]);
+    data.remove_row(5);
+    data.remove_row(6);
+    data.set_cell(0, 1, number(1.0));
+    data.set_row(LAST_ROW + 1, vec![(1, number(1.0))]);
+    let cell = Change::Cell { row: 3, column: 2 };
+    assert_eq!(
+        data.take_changes(),
+        vec![cell, cell, cell, Change::Row(5), Change::Row(5)]
+    );
+    assert!(data.changes().is_empty());
+    data.set_cell(9, 9, number(1.0));
+    assert_eq!(data.changes(), [Change::Cell { row: 9, column: 9 }]);
+}
+
+#[test]
+fn the_log_is_neither_saved_nor_compared() {
+    let mut logged = SheetData::new();
+    logged.log_changes(true);
+    logged.set_row(2, vec![(1, number(1.0)), (2, text(3))]);
+    let mut plain = SheetData::new();
+    plain.set_row(2, vec![(1, number(1.0)), (2, text(3))]);
+    assert_eq!(logged, plain);
+    assert_eq!(bitcode::encode(&logged), bitcode::encode(&plain));
+    let mut read: SheetData = bitcode::decode(&bitcode::encode(&logged)).unwrap();
+    read.set_cell(1, 1, number(1.0));
+    assert!(read.changes().is_empty());
+}
+
+fn formula(f: i32, v: f64) -> Cell {
+    Cell::CellFormula {
+        f,
+        s: 0,
+        v: FormulaValue::Number(v),
+    }
+}
+
+#[test]
+fn a_computed_value_is_written_unlogged() {
+    let mut data = SheetData::new();
+    data.set_cell(1, 1, formula(0, 1.0));
+    data.set_cell(
+        1,
+        2,
+        Cell::SpillCell {
+            s: 0,
+            a: (1, 1),
+            v: SpillValue::Number(1.0),
+        },
+    );
+    data.log_changes(true);
+    let mut value = data.cell_mut_value(1, 1).unwrap();
+    assert_eq!(value.cell(), &formula(0, 1.0));
+    assert_eq!(value.set_value_from(formula(0, 2.0)), Ok(()));
+    let spill = Cell::SpillCell {
+        s: 0,
+        a: (1, 1),
+        v: SpillValue::Text("x".to_string()),
+    };
+    let mut value = data.cell_mut_value(1, 2).unwrap();
+    assert_eq!(value.set_value_from(spill.clone()), Ok(()));
+    assert_eq!(data.cell(1, 1).as_deref(), Some(&formula(0, 2.0)));
+    assert_eq!(data.cell(1, 2).as_deref(), Some(&spill));
+    assert!(data.changes().is_empty());
+}
+
+#[test]
+fn only_the_value_of_a_computed_cell_can_be_written_unlogged() {
+    let mut data = SheetData::new();
+    data.set_cell(1, 1, formula(0, 1.0));
+    data.set_cell(1, 2, text(1));
+    data.set_row(2, vec![(1, number(1.0)), (2, number(2.0))]);
+    let anchor = Cell::ArrayFormula {
+        f: 1,
+        s: 0,
+        r: (2, 2),
+        kind: ArrayKind::Cse,
+        v: FormulaValue::Number(1.0),
+    };
+    data.set_cell(3, 1, anchor.clone());
+    for (row, column) in [(1, 2), (2, 1), (1, 9)] {
+        assert!(data.cell_mut_value(row, column).is_none());
+    }
+    assert!(is_numbers(&data, 2));
+    // anything but the value differs: nothing is written
+    let mut value = data.cell_mut_value(1, 1).unwrap();
+    for other in [formula(1, 2.0), number(2.0), anchor.clone()] {
+        assert_eq!(value.set_value_from(other.clone()), Err(other));
+    }
+    let resized = Cell::ArrayFormula {
+        f: 1,
+        s: 0,
+        r: (1, 1),
+        kind: ArrayKind::Cse,
+        v: FormulaValue::Number(2.0),
+    };
+    let mut value = data.cell_mut_value(3, 1).unwrap();
+    assert_eq!(value.set_value_from(resized.clone()), Err(resized));
+    assert_eq!(data.cell(1, 1).as_deref(), Some(&formula(0, 1.0)));
+    assert_eq!(data.cell(3, 1).as_deref(), Some(&anchor));
 }

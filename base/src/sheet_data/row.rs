@@ -180,6 +180,18 @@ impl Row {
         Some(&mut cells[index].1)
     }
 
+    /// The cell at a column, to be changed in place, if the row holds it as a
+    /// cell. A row of numbers stays one.
+    pub(super) fn get_held_mut(&mut self, column: i32) -> Option<&mut Cell> {
+        match self {
+            Row::Cells(cells) => {
+                let index = position(cells, column).ok()?;
+                Some(&mut cells[index].1)
+            }
+            Row::Numbers { .. } => None,
+        }
+    }
+
     pub(super) fn is_empty(&self) -> bool {
         match self {
             Row::Cells(cells) => cells.is_empty(),
