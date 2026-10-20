@@ -61,6 +61,25 @@ impl Worksheet {
         Ok(())
     }
 
+    /// Writes a computed cell (a formula, array formula or spill cell). If the
+    /// cell there differs from it in its value alone, only the value is
+    /// written, and the change is not logged (see `SheetData::cell_mut_value`).
+    pub(crate) fn write_computed_cell(
+        &mut self,
+        row: i32,
+        column: i32,
+        cell: Cell,
+    ) -> Result<(), String> {
+        let cell = match self.sheet_data.cell_mut_value(row, column) {
+            Some(mut value) => match value.set_value_from(cell) {
+                Ok(()) => return Ok(()),
+                Err(cell) => cell,
+            },
+            None => cell,
+        };
+        self.update_cell(row, column, cell)
+    }
+
     // See: get_style_for_cell
     fn get_row_column_style(&self, row_index: i32, column_index: i32) -> i32 {
         let rows = &self.rows;

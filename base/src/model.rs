@@ -179,6 +179,40 @@ fn formula_value_to_spill_value(v: &FormulaValue) -> SpillValue {
     }
 }
 
+/// What setting the result of a formula does to the sheet, worked out by
+/// `Model::plan_result` and done by `Model::apply_result`.
+pub(crate) struct ResultPlan {
+    /// The formula cell.
+    at: CellReferenceIndex,
+    /// What the formula cell is written as, if it is written.
+    cell: Option<Cell>,
+    /// The formula cell must be on the sheet already.
+    must_exist: bool,
+    /// Spill cells of other arrays that keep a dynamic anchor from spilling.
+    occupied: Vec<CellReferenceIndex>,
+    /// The formula cell is a dynamic anchor, whose writes and clears are
+    /// checked against what the pass has read before any is made.
+    checked: bool,
+    /// Spill cells to write, with their row and column.
+    spills: Vec<(i32, i32, Cell)>,
+    /// The anchor's own spill cells to clear.
+    clears: Vec<CellKey>,
+}
+
+impl ResultPlan {
+    fn new(at: CellReferenceIndex, cell: Option<Cell>) -> Self {
+        ResultPlan {
+            at,
+            cell,
+            must_exist: false,
+            occupied: Vec::new(),
+            checked: false,
+            spills: Vec::new(),
+            clears: Vec::new(),
+        }
+    }
+}
+
 /// A dynamical IronCalc model.
 ///
 /// Its is composed of a `Workbook`. Everything else are dynamical quantities:
@@ -968,27 +1002,40 @@ impl<'a> Model<'a> {
     }
 
     /// Sets `result` in the formula cell at `cell_reference`, which `cell`
-    /// describes (see `FormulaCell`)
-    /// If the result is an array it will spill over other cells
-    /// If the formula is an array formula it will update the spill area.
-    ///    If the array is smaller than the spill area it will fill the remaining cells with #N/A error
-    ///    If the array is just one element it will fill the original range with that element
+    /// describes (see `FormulaCell`): `apply_result` of `plan_result`.
     pub(crate) fn set_cells_with_result(
         &mut self,
         cell_reference: CellReferenceIndex,
         cell: FormulaCell,
         result: &CalcResult,
     ) -> Result<(), String> {
+        let plan = self.plan_result(cell_reference, cell, result)?;
+        self.apply_result(plan)
+    }
+
+    /// What setting `result` in the formula cell at `cell_reference`, which
+    /// `cell` describes (see `FormulaCell`), does to the sheet, worked out
+    /// without changing anything.
+    /// If the result is an array it will spill over other cells
+    /// If the formula is an array formula it will update the spill area.
+    ///    If the array is smaller than the spill area it will fill the remaining cells with #N/A error
+    ///    If the array is just one element it will fill the original range with that element
+    pub(crate) fn plan_result(
+        &self,
+        cell_reference: CellReferenceIndex,
+        cell: FormulaCell,
+        result: &CalcResult,
+    ) -> Result<ResultPlan, String> {
         let CellReferenceIndex { sheet, column, row } = cell_reference;
         let original_range = cell.array;
         let s = cell.s;
         let formula = cell.f;
-        // Handle array results separately: they always return early, writing all cells
-        // themselves. By dispatching here we avoid needing an unreachable arm in the
-        // `new_cell` match below.
+        // Handle array results separately: they always return early, planning
+        // all cells themselves. By dispatching here we avoid needing an
+        // unreachable arm in the `new_cell` match below.
         if let CalcResult::Array(array) = result {
             if array.is_empty() || array[0].is_empty() {
-                return self.set_cells_with_result(
+                return self.plan_result(
                     cell_reference,
                     cell,
                     &CalcResult::new_error(
@@ -1003,26 +1050,19 @@ impl<'a> Model<'a> {
 
             match original_range {
                 Some((true, old_area)) => {
-                    return match self.spill_dynamic_array(
-                        cell_reference,
-                        old_area,
-                        formula,
-                        s,
-                        array,
-                    )? {
-                        Some(error) => self.set_cells_with_result(cell_reference, cell, &error),
-                        None => Ok(()),
-                    };
+                    return self.plan_dynamic_spill(cell_reference, cell, old_area, array);
                 }
                 Some((false, (original_width, original_height))) => {
                     // CSE array formula: fill the declared range with the array values.
                     // Use relative indices for get_value_from_array (1-based).
+                    let worksheet = &self.workbook.worksheets[sheet as usize];
+                    let mut plan = ResultPlan::new(cell_reference, None);
                     for r in row..row + original_height {
                         for c in column..column + original_width {
                             let rel_row = r - row + 1;
                             let rel_col = c - column + 1;
                             let value = self.get_value_from_array(array, rel_row, rel_col);
-                            let new_cell = if r == row && c == column {
+                            if r == row && c == column {
                                 let fv = match value {
                                     Some(node) => array_node_to_formula_value(node),
                                     None => FormulaValue::new_error(
@@ -1031,33 +1071,31 @@ impl<'a> Model<'a> {
                                         "Unexpected array result".to_string(),
                                     ),
                                 };
-                                Cell::ArrayFormula {
+                                plan.cell = Some(Cell::ArrayFormula {
                                     f: formula,
                                     s,
                                     r: (original_width, original_height),
                                     kind: ArrayKind::Cse,
                                     v: fv,
-                                }
+                                });
                             } else {
                                 let sv = match value {
                                     Some(node) => array_node_to_spill_value(node),
                                     None => SpillValue::Error(Error::VALUE),
                                 };
-                                let existing_style =
-                                    self.workbook.worksheets[sheet as usize].get_style(r, c);
-                                Cell::SpillCell {
-                                    s: existing_style,
-                                    a: (row, column),
-                                    v: sv,
-                                }
-                            };
-                            // The cells are created on demand: a structural
-                            // operation may have moved the array without them.
-                            self.workbook.worksheets[sheet as usize].update_cell(r, c, new_cell)?;
+                                plan.spills.push((
+                                    r,
+                                    c,
+                                    Cell::SpillCell {
+                                        s: worksheet.get_style(r, c),
+                                        a: (row, column),
+                                        v: sv,
+                                    },
+                                ));
+                            }
                         }
                     }
-                    // All cells (anchor + spills) have been written above.
-                    return Ok(());
+                    return Ok(plan);
                 }
                 None => {
                     // Scalar formula produced an array at runtime. We only coerce safely
@@ -1097,14 +1135,16 @@ impl<'a> Model<'a> {
                             "Array result in scalar context".to_string(),
                         )
                     };
-                    *self.workbook.worksheets[sheet as usize]
-                        .cell_mut(row, column)
-                        .ok_or("expected a cell")? = Cell::CellFormula {
-                        f: formula,
-                        s,
-                        v: coerced,
-                    };
-                    return Ok(());
+                    let mut plan = ResultPlan::new(
+                        cell_reference,
+                        Some(Cell::CellFormula {
+                            f: formula,
+                            s,
+                            v: coerced,
+                        }),
+                    );
+                    plan.must_exist = true;
+                    return Ok(plan);
                 }
             }
         }
@@ -1114,7 +1154,7 @@ impl<'a> Model<'a> {
                 // safety belt
                 if value.is_nan() || value.is_infinite() {
                     // This should never happen, is there a way we can log this events?
-                    return self.set_cells_with_result(
+                    return self.plan_result(
                         cell_reference,
                         cell,
                         &CalcResult::Error {
@@ -1146,7 +1186,7 @@ impl<'a> Model<'a> {
             }
             CalcResult::EmptyCell | CalcResult::EmptyArg => {
                 // We treat empty cells as number 0.
-                return self.set_cells_with_result(cell_reference, cell, &CalcResult::Number(0.0));
+                return self.plan_result(cell_reference, cell, &CalcResult::Number(0.0));
             }
             // CalcResult::Array is handled before this match (see above); it always returns early.
             CalcResult::Array(_) | CalcResult::Lambda(_) => {
@@ -1155,125 +1195,83 @@ impl<'a> Model<'a> {
             }
         };
 
+        let mut plan = ResultPlan::new(cell_reference, None);
         if let Some((true, old_area)) = original_range {
             // A dynamic anchor without an array to spill keeps no spill cells.
-            if !self.retire_own_spill_cells(cell_reference, old_area, (1, 1))? {
-                return Ok(());
-            }
+            plan.checked = true;
+            plan.clears = self.own_spill_cells_outside(cell_reference, old_area, (1, 1))?;
         }
 
         // If the cell is the anchor of a CSE array formula, fill all spill cells
         if let Some((false, (width, height))) = original_range {
             let spill_value = formula_value_to_spill_value(&formula_value);
-            let ws = &mut self.workbook.worksheets[sheet as usize];
+            let worksheet = &self.workbook.worksheets[sheet as usize];
             for r in row..row + height {
                 for c in column..column + width {
                     if r == row && c == column {
                         continue;
                     }
-                    let existing_style = ws.get_style(r, c);
-                    ws.update_cell(
+                    plan.spills.push((
                         r,
                         c,
                         Cell::SpillCell {
                             a: (row, column),
-                            s: existing_style,
+                            s: worksheet.get_style(r, c),
                             v: spill_value.clone(),
                         },
-                    )?;
+                    ));
                 }
             }
         }
 
-        // The formula cell is on the sheet already and only its value changes:
-        // write into it rather than build a cell to replace it. This runs once
-        // for every formula of every evaluation.
-        let worksheet = &mut self.workbook.worksheets[sheet as usize];
-        match (worksheet.cell_mut(row, column), original_range) {
-            (Some(Cell::CellFormula { f, s: style, v }), None) => {
-                *f = formula;
-                *style = s;
-                *v = formula_value;
-            }
-            (
-                Some(Cell::ArrayFormula {
-                    f,
-                    s: style,
-                    r,
-                    kind,
-                    v,
-                }),
-                Some((is_dynamic, area)),
-            ) => {
-                *f = formula;
-                *style = s;
+        plan.cell = Some(match original_range {
+            Some((is_dynamic, area)) => {
                 // A dynamic anchor that stores a single value has no area.
-                (*kind, *r) = if is_dynamic {
+                let (kind, r) = if is_dynamic {
                     (ArrayKind::Dynamic, (1, 1))
                 } else {
                     (ArrayKind::Cse, area)
                 };
-                *v = formula_value;
+                Cell::ArrayFormula {
+                    f: formula,
+                    s,
+                    r,
+                    kind,
+                    v: formula_value,
+                }
             }
-            // Not expected: the cell is not the formula cell it was when its
-            // formula started to run. Replace whatever is there.
-            (_, original_range) => {
-                let new_cell = match original_range {
-                    Some((is_dynamic, area)) => {
-                        let (kind, r) = if is_dynamic {
-                            (ArrayKind::Dynamic, (1, 1))
-                        } else {
-                            (ArrayKind::Cse, area)
-                        };
-                        Cell::ArrayFormula {
-                            f: formula,
-                            s,
-                            r,
-                            kind,
-                            v: formula_value,
-                        }
-                    }
-                    None => Cell::CellFormula {
-                        f: formula,
-                        s,
-                        v: formula_value,
-                    },
-                };
-                worksheet.update_cell(row, column, new_cell)?;
-            }
-        }
-        Ok(())
+            None => Cell::CellFormula {
+                f: formula,
+                s,
+                v: formula_value,
+            },
+        });
+        Ok(plan)
     }
 
-    /// Spills `array` from the dynamic anchor at `anchor`, which currently
-    /// occupies `old_area` (width, height). Returns the error the anchor must
-    /// store instead when the array cannot be spilled: it would leave the sheet,
-    /// or a cell of the area is occupied. Own spill cells never block: they are
-    /// rewritten or, outside the new area, removed.
-    ///
-    /// Before writing, the evaluation is asked whether the write contradicts
-    /// what a formula already read in this pass; if so nothing is written and
-    /// the pass restarts (see `evaluation.rs`).
-    fn spill_dynamic_array(
-        &mut self,
+    /// Plans the spill of `array` from the dynamic anchor at `anchor`, which
+    /// currently occupies `old_area` (width, height). When the array cannot be
+    /// spilled (it would leave the sheet, or a cell of the area is occupied)
+    /// the anchor stores an error instead. Own spill cells never block: they
+    /// are rewritten or, outside the new area, removed.
+    fn plan_dynamic_spill(
+        &self,
         anchor: CellReferenceIndex,
+        cell: FormulaCell,
         old_area: (i32, i32),
-        formula: i32,
-        style: i32,
         array: &[Vec<ArrayNode>],
-    ) -> Result<Option<CalcResult>, String> {
+    ) -> Result<ResultPlan, String> {
         let CellReferenceIndex { sheet, row, column } = anchor;
         let height = array.len() as i32;
         let width = array[0].len() as i32;
-        let spill_error = |message: &str| {
-            Some(CalcResult::new_error(
-                Error::SPILL,
-                anchor,
-                message.to_string(),
-            ))
-        };
+        let spill_error =
+            |message: &str| CalcResult::new_error(Error::SPILL, anchor, message.to_string());
         if row + height - 1 > LAST_ROW || column + width - 1 > LAST_COLUMN {
-            return Ok(spill_error("Spill would exceed worksheet bounds"));
+            return self.plan_result(
+                anchor,
+                cell,
+                &spill_error("Spill would exceed worksheet bounds"),
+            );
         }
 
         // Is the area free? Another array's spill cell blocks, whichever anchor
@@ -1281,99 +1279,113 @@ impl<'a> Model<'a> {
         // Excel, and the newcomer gets #SPILL! until it goes away. Such cells
         // are recorded as seen occupied, since removing them later in the pass
         // would change this outcome.
+        let worksheet = self.workbook.worksheet(sheet)?;
         let mut blocked = false;
         let mut occupied_by_other_spills = Vec::new();
-        {
-            let worksheet = self.workbook.worksheet(sheet)?;
-            for r in row..row + height {
-                for c in column..column + width {
-                    if (r, c) == (row, column) {
-                        continue;
-                    }
-                    if worksheet.merged_cell_containing(r, c).is_some() {
+        for r in row..row + height {
+            for c in column..column + width {
+                if (r, c) == (row, column) {
+                    continue;
+                }
+                if worksheet.merged_cell_containing(r, c).is_some() {
+                    blocked = true;
+                    continue;
+                }
+                match worksheet.cell(r, c).as_deref() {
+                    None | Some(Cell::EmptyCell { .. }) => {}
+                    Some(Cell::SpillCell { a, .. }) if *a == (row, column) => {}
+                    Some(Cell::SpillCell { .. }) => {
                         blocked = true;
-                        continue;
+                        occupied_by_other_spills.push(CellReferenceIndex {
+                            sheet,
+                            row: r,
+                            column: c,
+                        });
                     }
-                    match worksheet.cell(r, c).as_deref() {
-                        None | Some(Cell::EmptyCell { .. }) => {}
-                        Some(Cell::SpillCell { a, .. }) if *a == (row, column) => {}
-                        Some(Cell::SpillCell { .. }) => {
-                            blocked = true;
-                            occupied_by_other_spills.push(CellReferenceIndex {
-                                sheet,
-                                row: r,
-                                column: c,
-                            });
-                        }
-                        Some(_) => blocked = true,
-                    }
+                    Some(_) => blocked = true,
                 }
             }
         }
-        for position in occupied_by_other_spills {
-            self.record_seen(position, Seen::Occupied);
-        }
         if blocked {
-            return Ok(spill_error("Cannot spill array result"));
+            let mut plan =
+                self.plan_result(anchor, cell, &spill_error("Cannot spill array result"))?;
+            plan.occupied = occupied_by_other_spills;
+            return Ok(plan);
         }
 
-        let writes: Vec<CellKey> = (row..row + height)
-            .flat_map(|r| (column..column + width).map(move |c| (sheet, r, c)))
-            .filter(|&(_, r, c)| (r, c) != (row, column))
-            .collect();
-        let clears = self.own_spill_cells_outside(anchor, old_area, (width, height))?;
-        if self.spill_contradicts_a_read(anchor, &writes, &clears) {
-            return Ok(None);
-        }
-
-        let worksheet = self.workbook.worksheet_mut(sheet)?;
+        let mut plan = ResultPlan::new(anchor, None);
+        plan.checked = true;
+        plan.clears = self.own_spill_cells_outside(anchor, old_area, (width, height))?;
         for r in row..row + height {
             for c in column..column + width {
                 let value = array[(r - row) as usize][(c - column) as usize].clone();
-                let cell = if (r, c) == (row, column) {
-                    Cell::ArrayFormula {
-                        f: formula,
-                        s: style,
+                if (r, c) == (row, column) {
+                    plan.cell = Some(Cell::ArrayFormula {
+                        f: cell.f,
+                        s: cell.s,
                         r: (width, height),
                         kind: ArrayKind::Dynamic,
                         v: array_node_to_formula_value(value),
-                    }
+                    });
                 } else {
-                    Cell::SpillCell {
-                        a: (row, column),
-                        s: worksheet.get_style(r, c),
-                        v: array_node_to_spill_value(value),
-                    }
-                };
-                // Cells are created on demand: rows and columns may not exist yet.
-                worksheet.update_cell(r, c, cell)?;
+                    plan.spills.push((
+                        r,
+                        c,
+                        Cell::SpillCell {
+                            a: (row, column),
+                            s: worksheet.get_style(r, c),
+                            v: array_node_to_spill_value(value),
+                        },
+                    ));
+                }
             }
         }
-        for (_, r, c) in clears {
-            worksheet.cell_clear_contents(r, c)?;
-        }
-        Ok(None)
+        Ok(plan)
     }
 
-    /// Removes the spill cells the dynamic anchor at `anchor` still has from a
-    /// previous evaluation outside `keep_area` (width, height). Returns `false`
-    /// without touching the sheet when the evaluation decides the pass must
-    /// restart instead (a formula was blocked by one of those cells).
-    fn retire_own_spill_cells(
-        &mut self,
-        anchor: CellReferenceIndex,
-        old_area: (i32, i32),
-        keep_area: (i32, i32),
-    ) -> Result<bool, String> {
-        let clears = self.own_spill_cells_outside(anchor, old_area, keep_area)?;
-        if self.spill_contradicts_a_read(anchor, &[], &clears) {
-            return Ok(false);
+    /// Does what `plan_result` planned. A computed cell that differs from the
+    /// one on the sheet in its value alone has its value written, unlogged
+    /// (`SheetData::cell_mut_value`); any other cell is written whole.
+    ///
+    /// Before writing, the evaluation is told what blocked a dynamic anchor
+    /// and asked whether the anchor's writes contradict what a formula already
+    /// read in this pass; if so nothing is written and the pass restarts (see
+    /// `evaluation.rs`).
+    pub(crate) fn apply_result(&mut self, plan: ResultPlan) -> Result<(), String> {
+        let ResultPlan {
+            at,
+            cell,
+            must_exist,
+            occupied,
+            checked,
+            spills,
+            clears,
+        } = plan;
+        for position in occupied {
+            self.record_seen(position, Seen::Occupied);
         }
-        let worksheet = self.workbook.worksheet_mut(anchor.sheet)?;
+        if checked {
+            let writes: Vec<CellKey> = spills.iter().map(|&(r, c, _)| (at.sheet, r, c)).collect();
+            if self.spill_contradicts_a_read(at, &writes, &clears) {
+                return Ok(());
+            }
+        }
+        let worksheet = self.workbook.worksheet_mut(at.sheet)?;
+        for (r, c, spill) in spills {
+            // Cells are created on demand: rows and columns may not exist yet,
+            // and a structural operation may have moved an array without them.
+            worksheet.write_computed_cell(r, c, spill)?;
+        }
         for (_, r, c) in clears {
             worksheet.cell_clear_contents(r, c)?;
         }
-        Ok(true)
+        if let Some(cell) = cell {
+            if must_exist && worksheet.cell(at.row, at.column).is_none() {
+                return Err("expected a cell".to_string());
+            }
+            worksheet.write_computed_cell(at.row, at.column, cell)?;
+        }
+        Ok(())
     }
 
     /// The spill cells of `anchor` inside `old_area` but outside `keep_area`

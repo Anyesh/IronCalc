@@ -5,7 +5,9 @@ use std::borrow::Cow;
 
 use bitcode::{Decode, Encode};
 
+use super::changes::Change;
 use super::row::Row;
+use super::value::CellValueMut;
 use crate::constants::LAST_ROW;
 use crate::types::Cell;
 
@@ -23,12 +25,19 @@ const CHUNK_MASK: usize = CHUNK_ROWS - 1;
 ///
 /// Rows outside the sheet, below 1 or beyond the last row, cannot hold cells:
 /// writing to them does nothing and reading them finds nothing.
+///
+/// Asked to (`log_changes`), the sheet logs every change made through
+/// `cell_mut`, `set_cell`, `remove_cell`, `remove_row` and `set_row`, and
+/// none made through `cell_mut_value`. The log is neither saved nor compared.
 #[derive(Encode, Decode, Debug, Clone, Default)]
 pub struct SheetData {
     /// `chunks[i]` holds rows `i * CHUNK_ROWS ..`, if any of them exists.
     chunks: Vec<Option<Box<Chunk>>>,
     /// How many rows exist.
     row_count: usize,
+    /// The changes since the log was last taken, if they are being logged.
+    #[bitcode(skip)]
+    changes: Option<Vec<Change>>,
 }
 
 #[derive(Encode, Decode, Debug, Clone)]
@@ -113,14 +122,58 @@ impl SheetData {
         self.row(row)?.get(column)
     }
 
+    /// Starts logging changes (see `changes`), or stops and forgets them.
+    /// Starting while logging keeps what is logged.
+    pub fn log_changes(&mut self, on: bool) {
+        if on {
+            self.changes.get_or_insert_with(Vec::new);
+        } else {
+            self.changes = None;
+        }
+    }
+
+    /// The changes since the log was started or last taken, oldest first. A
+    /// position can be there more than once, and for a change that wrote what
+    /// was already there.
+    pub fn changes(&self) -> &[Change] {
+        self.changes.as_deref().unwrap_or_default()
+    }
+
+    /// The changes, leaving the log empty and still logging.
+    pub fn take_changes(&mut self) -> Vec<Change> {
+        self.changes
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
+    }
+
+    #[inline]
+    fn log(&mut self, change: Change) {
+        if let Some(changes) = &mut self.changes {
+            changes.push(change);
+        }
+    }
+
     /// The cell at a position, to be changed in place.
     pub fn cell_mut(&mut self, row: i32, column: i32) -> Option<&mut Cell> {
+        if self.changes.is_some() && self.cell(row, column).is_some() {
+            self.log(Change::Cell { row, column });
+        }
         self.row_mut(row)?.get_mut(column)
+    }
+
+    /// The value of the formula, array formula or spill cell at a position, to
+    /// be changed in place. This is the one change that is not logged: it is
+    /// how computed values are written back.
+    pub fn cell_mut_value(&mut self, row: i32, column: i32) -> Option<CellValueMut<'_>> {
+        CellValueMut::of(self.row_mut(row)?.get_held_mut(column)?)
     }
 
     /// Puts a cell at a position and returns the one that was there.
     pub fn set_cell(&mut self, row: i32, column: i32, cell: Cell) -> Option<Cell> {
-        self.row_or_insert(row)?.insert(column, cell)
+        let old = self.row_or_insert(row)?.insert(column, cell);
+        self.log(Change::Cell { row, column });
+        old
     }
 
     /// Removes the cell at a position and returns it.
@@ -128,8 +181,9 @@ impl SheetData {
         let row_data = self.row_mut(row)?;
         let cell = row_data.remove(column)?;
         if row_data.is_empty() {
-            self.remove_row(row);
+            self.drop_row(row);
         }
+        self.log(Change::Cell { row, column });
         Some(cell)
     }
 
@@ -211,19 +265,28 @@ impl SheetData {
 
     /// Removes every cell of a row, and the row.
     pub fn remove_row(&mut self, row: i32) {
+        if self.drop_row(row) {
+            self.log(Change::Row(row));
+        }
+    }
+
+    /// Removes the row, unlogged. True if it existed.
+    fn drop_row(&mut self, row: i32) -> bool {
         let Some((chunk_index, index)) = locate(row) else {
-            return;
+            return false;
         };
         let Some(Some(chunk)) = self.chunks.get_mut(chunk_index) else {
-            return;
+            return false;
         };
-        if chunk.rows[index].take().is_some() {
-            chunk.used -= 1;
-            self.row_count -= 1;
-            if chunk.used == 0 {
-                self.chunks[chunk_index] = None;
-            }
+        if chunk.rows[index].take().is_none() {
+            return false;
         }
+        chunk.used -= 1;
+        self.row_count -= 1;
+        if chunk.used == 0 {
+            self.chunks[chunk_index] = None;
+        }
+        true
     }
 
     /// Replaces the cells of a row. The row exists afterwards, even with no
@@ -253,6 +316,7 @@ impl SheetData {
         }
         cells.shrink_to_fit();
         *row_data = Row::from_cells(cells);
+        self.log(Change::Row(row));
     }
 }
 
