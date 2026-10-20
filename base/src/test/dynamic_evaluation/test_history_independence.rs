@@ -27,7 +27,7 @@ use std::collections::BTreeMap;
 const ROWS: i32 = 5;
 const COLS: i32 = 5;
 const EDITS: usize = 14;
-const SEEDS: u64 = 600;
+pub(crate) const SEEDS: u64 = 600;
 
 struct Rng(u64);
 
@@ -53,7 +53,7 @@ enum Content {
 }
 
 #[derive(Clone, Debug)]
-enum Edit {
+pub(crate) enum Edit {
     Set(u32, i32, i32, String),
     Clear(u32, i32, i32),
     Cse(u32, i32, i32, i32, i32, String),
@@ -124,7 +124,7 @@ fn random_content(rng: &mut Rng, sheet: u32) -> String {
     }
 }
 
-fn random_edits(seed: u64) -> Vec<Edit> {
+pub(crate) fn random_edits(seed: u64) -> Vec<Edit> {
     let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
     let mut edits = Vec::new();
     while edits.len() < EDITS {

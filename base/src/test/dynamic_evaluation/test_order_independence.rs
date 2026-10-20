@@ -29,7 +29,7 @@ use crate::Model;
 const ROWS: i32 = 5;
 const COLS: i32 = 5;
 const CELLS_PER_SHEET: usize = 12;
-const SEEDS: u64 = 1000;
+pub(crate) const SEEDS: u64 = 1000;
 
 struct Rng(u64);
 
@@ -94,7 +94,7 @@ fn random_content(rng: &mut Rng) -> String {
     }
 }
 
-pub(super) fn random_sheet(seed: u64) -> Vec<(String, String)> {
+pub(crate) fn random_sheet(seed: u64) -> Vec<(String, String)> {
     let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
     let mut cells: Vec<(String, String)> = Vec::new();
     while cells.len() < CELLS_PER_SHEET {

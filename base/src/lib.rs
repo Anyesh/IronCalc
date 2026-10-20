@@ -58,6 +58,9 @@ mod implicit_intersection;
 #[cfg(feature = "incr")]
 mod incr;
 pub mod links;
+#[cfg(feature = "incr")]
+#[doc(hidden)]
+pub mod lockstep;
 mod merged_cells;
 mod model;
 mod styles;

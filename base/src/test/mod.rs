@@ -59,6 +59,8 @@ mod test_general;
 #[cfg(feature = "incr")]
 mod test_incr;
 #[cfg(feature = "incr")]
+mod test_incr_lockstep;
+#[cfg(feature = "incr")]
 mod test_incr_read_audit;
 mod test_inverted_ranges;
 mod test_issue_623;
@@ -103,7 +105,7 @@ mod test_number_format;
 
 mod array_formulas;
 mod compatibility;
-mod dynamic_evaluation;
+pub(crate) mod dynamic_evaluation;
 mod logical;
 mod lookup_and_reference;
 mod test_arrays;
