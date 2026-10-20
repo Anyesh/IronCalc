@@ -123,8 +123,13 @@ impl SheetData {
     }
 
     /// Starts logging changes (see `changes`), or stops and forgets them.
+    /// Starting while logging keeps what is logged.
     pub fn log_changes(&mut self, on: bool) {
-        self.changes = on.then(Vec::new);
+        if on {
+            self.changes.get_or_insert_with(Vec::new);
+        } else {
+            self.changes = None;
+        }
     }
 
     /// The changes since the log was started or last taken, oldest first. A

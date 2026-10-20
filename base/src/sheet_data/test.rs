@@ -411,6 +411,9 @@ fn changes_are_not_logged_unless_asked() {
     data.log_changes(true);
     data.set_cell(1, 1, number(3.0));
     assert_eq!(data.changes(), [Change::Cell { row: 1, column: 1 }]);
+    // asking again keeps what is logged
+    data.log_changes(true);
+    assert_eq!(data.changes(), [Change::Cell { row: 1, column: 1 }]);
     // turning the log off forgets it
     data.log_changes(false);
     data.set_cell(1, 1, number(4.0));
