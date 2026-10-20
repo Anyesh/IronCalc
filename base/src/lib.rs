@@ -55,6 +55,8 @@ mod cut_paste;
 mod evaluation;
 mod functions;
 mod implicit_intersection;
+#[cfg(feature = "incr")]
+mod incr;
 pub mod links;
 mod merged_cells;
 mod model;

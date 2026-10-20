@@ -56,6 +56,8 @@ mod test_forecast;
 mod test_frozen_rows_columns;
 mod test_gcd_lcm;
 mod test_general;
+#[cfg(feature = "incr")]
+mod test_incr;
 mod test_inverted_ranges;
 mod test_issue_623;
 mod test_math;

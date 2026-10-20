@@ -15,6 +15,7 @@ readme = "README.md"
 # Compiles the engine with a mocked clock so tests can pin NOW()/TODAY()
 # to the timestamp stored in a workbook's METADATA sheet (see `mock_time.rs`).
 mock_time = ["ironcalc_base/mock_time"]
+incr = ["ironcalc_base/incr"]
 
 [dependencies]
 zip = { version = "0.6.6", default-features = false, features = ["deflate"] }

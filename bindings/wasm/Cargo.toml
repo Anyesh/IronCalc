@@ -13,6 +13,7 @@ crate-type = ["cdylib"]
 [features]
 default = []
 xlsx = ["dep:ironcalc", "dep:time"]
+incr = ["ironcalc_base/incr"]
 
 [dependencies]
 # Uses `../ironcalc/base` when used locally, and uses

@@ -233,6 +233,9 @@ pub struct Model<'a> {
     /// (`parse_formulas`), extended when a formula is added. See
     /// `shared_formula_index`.
     pub(crate) shared_formula_lookup: Vec<SharedFormulaLookup>,
+    /// Set while the incremental evaluator is on (`set_incremental`).
+    #[cfg(feature = "incr")]
+    pub(crate) incr: Option<std::rc::Rc<crate::incr::IncrState>>,
 }
 
 /// Formula text to index in `Worksheet::shared_formulas`, for one sheet.
@@ -1865,6 +1868,8 @@ impl<'a> Model<'a> {
             evaluation: Evaluation::default(),
             cf_cache: HashMap::new(),
             links: HashMap::new(),
+            #[cfg(feature = "incr")]
+            incr: None,
         };
 
         model.parse_formulas();

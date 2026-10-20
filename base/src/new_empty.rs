@@ -702,6 +702,8 @@ impl<'a> Model<'a> {
             evaluation: crate::evaluation::Evaluation::default(),
             cf_cache: HashMap::new(),
             links: HashMap::new(),
+            #[cfg(feature = "incr")]
+            incr: None,
         };
         model.parse_formulas();
         model.evaluate_conditional_formatting();
