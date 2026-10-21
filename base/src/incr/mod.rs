@@ -81,6 +81,8 @@ pub(crate) struct IncrState {
     pub(crate) reference_runs: Cell<u32>,
     pub(crate) rebuilds: Cell<u32>,
     pub(crate) tile_reads: Cell<u64>,
+    /// Recalcs that walked every cell of a sheet to find its used area.
+    pub(crate) used_area_scans: Cell<u64>,
 }
 
 impl IncrState {
@@ -116,6 +118,7 @@ impl IncrState {
             reference_runs: Cell::new(0),
             rebuilds: Cell::new(0),
             tile_reads: Cell::new(0),
+            used_area_scans: Cell::new(0),
             rt,
         };
         state.follow_limits(max_depth, max_stack);
