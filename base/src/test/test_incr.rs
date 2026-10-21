@@ -610,3 +610,73 @@ fn a_formula_stores_what_plan_result_plans() {
         }
     }
 }
+
+#[test]
+fn every_content_and_computed_equals_its_clone() {
+    let contents = vec![
+        Content::Empty,
+        Content::Blank,
+        Content::Constant(Constant::Number(0.0)),
+        Content::Constant(Constant::Number(-0.0)),
+        Content::Constant(Constant::Number(f64::NAN)),
+        Content::Constant(Constant::Boolean(false)),
+        Content::Constant(Constant::Text(String::new())),
+        Content::Constant(Constant::Error(Error::REF)),
+        Content::Constant(Constant::MissingString),
+        Content::Formula {
+            f: 3,
+            array: None,
+            pinned: None,
+        },
+        Content::Formula {
+            f: 3,
+            array: Some((ArrayKind::Cse, (2, 3))),
+            pinned: None,
+        },
+        Content::Formula {
+            f: 3,
+            array: Some((ArrayKind::Dynamic, (1, 1))),
+            pinned: Some(Box::new(FormulaValue::Number(-0.0))),
+        },
+        Content::Spill {
+            anchor: (1, 2),
+            pinned: None,
+        },
+        Content::Spill {
+            anchor: (1, 2),
+            pinned: Some(Box::new(SpillValue::Text(String::new()))),
+        },
+    ];
+    let values = [
+        FormulaValue::Number(0.0),
+        FormulaValue::Number(-0.0),
+        FormulaValue::Number(f64::NAN),
+        FormulaValue::Boolean(true),
+        FormulaValue::Text(String::new()),
+        FormulaValue::new_error(Error::DIV, "A1".to_string(), "m".to_string()),
+        FormulaValue::Unevaluated,
+    ];
+    let mut computeds = Vec::new();
+    for v in values {
+        computeds.push(Computed::scalar(v.clone()));
+        computeds.push(Computed::new(
+            v.clone(),
+            vec![((1, 2), SpillValue::Number(-0.0))],
+        ));
+        computeds.push(Computed::scalar(v).reading_as(Content::Blank));
+    }
+    // Pairwise distinct, so that equal to its clone says the clone kept
+    // every field.
+    for (i, a) in contents.iter().enumerate() {
+        for (j, b) in contents.iter().enumerate() {
+            assert_eq!(a == b, i == j, "{a:?} {b:?}");
+        }
+        assert_eq!(&a.clone(), a);
+    }
+    for (i, a) in computeds.iter().enumerate() {
+        for (j, b) in computeds.iter().enumerate() {
+            assert_eq!(a == b, i == j, "{a:?} {b:?}");
+        }
+        assert_eq!(&a.clone(), a);
+    }
+}

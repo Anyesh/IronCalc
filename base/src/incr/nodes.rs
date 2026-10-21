@@ -15,7 +15,7 @@ pub(crate) type Position = (u32, i32, i32);
 /// A pinned position also holds the value the reference wrote there, which
 /// readers take instead of computing it: dynamic anchors and their spill
 /// cells always are, because their spills depend on the order of evaluation.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) enum Content {
     Empty,
     /// A cell that holds nothing but exists, for its style: it reads as
@@ -102,12 +102,54 @@ impl Content {
     }
 }
 
+// Every read of a node clones its value: the common cases are inline.
+impl Clone for Content {
+    #[inline]
+    fn clone(&self) -> Content {
+        match self {
+            Content::Empty => Content::Empty,
+            Content::Blank => Content::Blank,
+            Content::Constant(Constant::Number(v)) => Content::Constant(Constant::Number(*v)),
+            Content::Formula {
+                f,
+                array: None,
+                pinned: None,
+            } => Content::Formula {
+                f: *f,
+                array: None,
+                pinned: None,
+            },
+            other => other.clone_slow(),
+        }
+    }
+}
+
+impl Content {
+    #[inline(never)]
+    fn clone_slow(&self) -> Content {
+        match self {
+            Content::Empty => Content::Empty,
+            Content::Blank => Content::Blank,
+            Content::Constant(c) => Content::Constant(c.clone()),
+            Content::Formula { f, array, pinned } => Content::Formula {
+                f: *f,
+                array: array.clone(),
+                pinned: pinned.clone(),
+            },
+            Content::Spill { anchor, pinned } => Content::Spill {
+                anchor: *anchor,
+                pinned: pinned.clone(),
+            },
+        }
+    }
+}
+
 /// A spill cell a CSE anchor writes, by row and column, and its value.
 pub(crate) type SpillWrite = ((i32, i32), SpillValue);
 
 /// What `value(P)` holds: what the formula at P stores when it is evaluated,
 /// in the cell and, for a CSE anchor, in the cells of its area.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct Computed {
     pub(crate) v: FormulaValue,
     /// What only some positions have, behind one pointer: every formula
@@ -119,6 +161,19 @@ pub(crate) struct Computed {
 struct Rare {
     spills: Box<[SpillWrite]>,
     read_as: Option<Content>,
+}
+
+impl Clone for Computed {
+    #[inline]
+    fn clone(&self) -> Computed {
+        Computed {
+            v: match &self.v {
+                FormulaValue::Number(v) => FormulaValue::Number(*v),
+                v => v.clone(),
+            },
+            rare: self.rare.clone(),
+        }
+    }
 }
 
 impl Computed {
