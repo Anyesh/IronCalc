@@ -638,6 +638,11 @@ fn every_content_and_computed_equals_its_clone() {
             array: Some((ArrayKind::Dynamic, (1, 1))),
             pinned: Some(Box::new(FormulaValue::Number(-0.0))),
         },
+        Content::Formula {
+            f: 3,
+            array: None,
+            pinned: Some(Box::new(FormulaValue::Number(2.0))),
+        },
         Content::Spill {
             anchor: (1, 2),
             pinned: None,
