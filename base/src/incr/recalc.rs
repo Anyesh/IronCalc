@@ -308,7 +308,7 @@ impl Model<'_> {
     fn incr_watch(&self, state: &IncrState, p: Position) {
         let handle = self.incr_value_node(position(p));
         state.rt.watch(handle);
-        state.watched.borrow_mut().insert(handle.into(), p);
+        state.watched.borrow_mut().insert(handle, p);
     }
 
     fn incr_find_dynamic(&self, state: &IncrState) {
@@ -378,24 +378,19 @@ impl Model<'_> {
             match (&content, watched) {
                 (Content::Formula { .. }, None) => self.incr_watch(state, p),
                 (Content::Formula { .. }, Some(handle)) => {
-                    if !state.watched.borrow().contains_key(&handle.into()) {
+                    if !state.watched.borrow().contains(handle.into()) {
                         self.incr_watch(state, p);
                     }
                 }
                 (_, Some(handle)) => {
-                    if state.watched.borrow_mut().remove(&handle.into()).is_some() {
+                    if state.watched.borrow_mut().remove(handle.into()) {
                         rt.unwatch(handle);
                     }
                 }
                 (_, None) => {}
             }
         }
-        let known: Vec<(u32, Dimension)> = state
-            .dimensions
-            .borrow()
-            .iter()
-            .map(|(&sheet, &d)| (sheet, d))
-            .collect();
+        let known = state.dimensions.borrow().known();
         for (sheet, d) in known {
             let edited = touched
                 .range((sheet, i32::MIN, i32::MIN)..=(sheet, i32::MAX, i32::MAX))
@@ -478,8 +473,8 @@ impl Model<'_> {
         let watched = state.watched.borrow();
         let held = |handle: &ErasedIncr| {
             watched
-                .get(handle)
-                .is_some_and(|&p| state.is_pinned(p) || state.tainted.borrow().contains(&p))
+                .get(*handle)
+                .is_some_and(|(_, p)| state.is_pinned(p) || state.tainted.borrow().contains(&p))
         };
         if !reference && !reached.iter().any(held) {
             let mut carry = state.deferred.borrow_mut().take();
@@ -512,11 +507,11 @@ impl Model<'_> {
                 break;
             }
             for handle in drained {
-                let Some(p) = state.watched.borrow().get(&handle).copied() else {
+                let Some((value, p)) = state.watched.borrow().get(handle) else {
                     continue;
                 };
                 state.newly_tainted.set(false);
-                let computed = self.incr_value(position(p));
+                let computed = self.incr_value_of(position(p), value);
                 reference |= state.newly_tainted.replace(false);
                 if let Some(cycle) = state.rt.cycle_of(handle) {
                     reference = true;
@@ -528,7 +523,7 @@ impl Model<'_> {
                             cycle
                                 .participants()
                                 .iter()
-                                .filter_map(|member| watched.get(member).copied())
+                                .filter_map(|&member| watched.get(member).map(|(_, p)| p))
                                 .collect()
                         };
                         for member in members {
@@ -585,7 +580,7 @@ impl Model<'_> {
         }
         #[cfg(debug_assertions)]
         {
-            let watched: Vec<Position> = state.watched.borrow().values().copied().collect();
+            let watched = state.watched.borrow().positions();
             for p in watched {
                 assert_eq!(
                     self.incr_stores_own_circular(state, p),
@@ -637,7 +632,7 @@ impl Model<'_> {
         let watched = state
             .value
             .get(&state.rt, &p)
-            .is_some_and(|handle| state.watched.borrow().contains_key(&handle.into()));
+            .is_some_and(|handle| state.watched.borrow().contains(handle.into()));
         if !watched {
             return false;
         }
@@ -649,22 +644,24 @@ impl Model<'_> {
     }
 
     fn incr_write_back(&mut self, p: CellReferenceIndex, computed: Computed) {
-        let Some(cell) = self.fetch_cell(p).map(|cell| cell.into_owned()) else {
-            return;
-        };
         let Ok(worksheet) = self.workbook.worksheet_mut(p.sheet) else {
             return;
         };
+        let v = match worksheet.sheet_data.cell_mut_value(p.row, p.column) {
+            Some(mut value) => match value.set_formula_value(computed.v) {
+                Ok(()) => return,
+                Err(v) => v,
+            },
+            None => return,
+        };
+        let Some(cell) = worksheet
+            .sheet_data
+            .cell(p.row, p.column)
+            .map(|cell| cell.into_owned())
+        else {
+            return;
+        };
         let written = match cell {
-            Cell::CellFormula { f, s, .. } => worksheet.write_computed_cell(
-                p.row,
-                p.column,
-                Cell::CellFormula {
-                    f,
-                    s,
-                    v: computed.v,
-                },
-            ),
             Cell::ArrayFormula {
                 f,
                 s,
@@ -686,7 +683,7 @@ impl Model<'_> {
                     s,
                     r,
                     kind: ArrayKind::Cse,
-                    v: computed.v,
+                    v,
                 };
                 worksheet.write_computed_cell(p.row, p.column, anchor)
             }
@@ -705,7 +702,7 @@ impl Model<'_> {
                 "a recalc left changes in the log"
             );
         }
-        for (&sheet, &d) in state.dimensions.borrow().iter() {
+        for (sheet, d) in state.dimensions.borrow().known() {
             let used = self.workbook.worksheets[sheet as usize].dimension();
             assert_eq!(
                 d,
@@ -713,17 +710,16 @@ impl Model<'_> {
                 "the used area of sheet {sheet} changed with no change logged"
             );
         }
-        let watched: Vec<(ErasedIncr, Position)> = state
-            .watched
-            .borrow()
-            .iter()
-            .map(|(&handle, &p)| (handle, p))
-            .collect();
-        for (handle, p) in watched {
+        let watched = state.watched.borrow().positions();
+        for p in watched {
             // A deferred formula holds the reference's value and is computed
             // by the next recalc that needs no reference; computing it here
             // would make a debug build skip that path.
-            if state.is_pinned(p) || state.deferred.borrow().contains(handle) {
+            let deferred = state
+                .value
+                .get(&state.rt, &p)
+                .is_some_and(|handle| state.deferred.borrow().contains(handle.into()));
+            if state.is_pinned(p) || deferred {
                 continue;
             }
             let computed = self.incr_value(position(p));

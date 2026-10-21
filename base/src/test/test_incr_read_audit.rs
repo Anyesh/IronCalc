@@ -102,7 +102,7 @@ const ALLOWED: &[(&str, &str, usize, &str)] = &[
     ("incr/recalc.rs", "incr_rebuild", 3, RECALC),
     ("incr/recalc.rs", "incr_stores_own_circular", 1, RECALC),
     ("incr/recalc.rs", "incr_take_changes", 1, RECALC),
-    ("incr/recalc.rs", "incr_write_back", 2, RECALC),
+    ("incr/recalc.rs", "incr_write_back", 4, RECALC),
     ("incr/recalc.rs", "used_area_after", 2, RECALC),
     ("model.rs", "apply_result", 1, NOT_A_COMPUTE),
     ("model.rs", "can_clear_range", 1, NOT_A_COMPUTE),

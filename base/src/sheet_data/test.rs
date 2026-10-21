@@ -532,3 +532,28 @@ fn only_the_value_of_a_computed_cell_can_be_written_unlogged() {
     assert_eq!(data.cell(1, 1).as_deref(), Some(&formula(0, 1.0)));
     assert_eq!(data.cell(3, 1).as_deref(), Some(&anchor));
 }
+
+#[test]
+fn a_formula_value_is_written_unlogged_and_only_into_a_formula() {
+    let mut data = SheetData::new();
+    data.set_cell(1, 1, formula(0, 1.0));
+    let anchor = Cell::ArrayFormula {
+        f: 1,
+        s: 0,
+        r: (1, 1),
+        kind: ArrayKind::Cse,
+        v: FormulaValue::Number(1.0),
+    };
+    data.set_cell(2, 1, anchor.clone());
+    data.log_changes(true);
+    let mut value = data.cell_mut_value(1, 1).unwrap();
+    assert_eq!(value.set_formula_value(FormulaValue::Number(2.0)), Ok(()));
+    let mut value = data.cell_mut_value(2, 1).unwrap();
+    assert_eq!(
+        value.set_formula_value(FormulaValue::Number(2.0)),
+        Err(FormulaValue::Number(2.0))
+    );
+    assert_eq!(data.cell(1, 1).as_deref(), Some(&formula(0, 2.0)));
+    assert_eq!(data.cell(2, 1).as_deref(), Some(&anchor));
+    assert!(data.changes().is_empty());
+}
