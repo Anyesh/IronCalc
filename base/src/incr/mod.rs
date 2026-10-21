@@ -96,6 +96,8 @@ pub(crate) struct IncrState {
     pub(crate) reference_runs: Cell<u32>,
     pub(crate) rebuilds: Cell<u32>,
     pub(crate) tile_reads: Cell<u64>,
+    /// Runs of a `value` node's compute.
+    pub(crate) computes: Cell<u64>,
     /// Recalcs that walked every cell of a sheet to find its used area.
     pub(crate) used_area_scans: Cell<u64>,
     /// Walks of every cell for the dynamic anchors and their spill cells.
@@ -108,10 +110,7 @@ impl IncrState {
         // Every type a replayable compute reads, so that a doomed read has
         // something to return.
         rt.set_placeholder(Content::Empty);
-        rt.set_placeholder(Computed {
-            v: FormulaValue::Unevaluated,
-            spills: None,
-        });
+        rt.set_placeholder(Computed::new(FormulaValue::Unevaluated, Vec::new()));
         rt.set_placeholder(0_u64);
         rt.set_placeholder::<Dimension>((1, 1, 1, 1));
         let state = IncrState {
@@ -139,6 +138,7 @@ impl IncrState {
             reference_runs: Cell::new(0),
             rebuilds: Cell::new(0),
             tile_reads: Cell::new(0),
+            computes: Cell::new(0),
             used_area_scans: Cell::new(0),
             anchor_scans: Cell::new(0),
             rt,

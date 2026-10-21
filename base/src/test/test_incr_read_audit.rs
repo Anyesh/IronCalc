@@ -60,6 +60,8 @@ const SPILL_FALLBACK: &str =
 const SPILL_AREA: &str =
     "a dynamic spill's area: the tiles of each row; its merges: the metadata fingerprint";
 const FORMULA_TEXT: &str = "ISFORMULA and FORMULATEXT note the content first; edits otherwise";
+const PICKS_A_NODE: &str =
+    "SheetRead::exempt: picks whether a read depends on value or content; value computes from content";
 const PRIMITIVE: &str = "the read itself; each caller is on this list";
 
 /// `(file, function, lines that read, why)`.
@@ -94,6 +96,7 @@ const ALLOWED: &[(&str, &str, usize, &str)] = &[
     ("functions/statistical/if_ifs.rs", "fn_countifs", 1, TRACKED),
     ("functions/subtotal.rs", "cell_is_subtotal", 1, TRACKED),
     ("incr/read.rs", "content_on_sheet", 2, TRACKED),
+    ("incr/read.rs", "holds_computed_formula", 1, PICKS_A_NODE),
     ("incr/read.rs", "incr_circular", 1, TRACKED),
     ("incr/read.rs", "incr_dimension", 1, TRACKED),
     ("incr/recalc.rs", "a_row_changed", 1, RECALC),
