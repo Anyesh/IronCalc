@@ -103,23 +103,56 @@ impl Model<'_> {
     }
 
     /// What the cell at `p` reads as: `evaluate_cell` while a compute of the
-    /// incremental evaluator runs.
+    /// incremental evaluator runs. A formula's reader depends on `value(p)`
+    /// alone, which computes from `content(p)`.
     pub(crate) fn incr_read(&mut self, p: CellReferenceIndex) -> CalcResult {
-        match self.incr_content(p) {
+        let state = self.incr_state();
+        if self.holds_computed_formula(&state, p) {
+            let computed = self.incr_value(p);
+            return match computed.read_as() {
+                Some(content) => self.incr_read_content(p, content.clone()),
+                None => self.formula_value(computed.v, p),
+            };
+        }
+        let content = self.incr_content(p);
+        self.incr_read_content(p, content)
+    }
+
+    /// Whether the sheet holds a formula at `p` whose readers take
+    /// `value(p)`: not a dynamic anchor or a cycle pin, whose readers take
+    /// the reference's value from `content(p)`.
+    fn holds_computed_formula(&self, state: &IncrState, p: CellReferenceIndex) -> bool {
+        // It picks the node a read depends on, not what the read gives:
+        // `value(p)` computes from `content(p)`.
+        let _read = SheetRead::exempt();
+        matches!(
+            self.fetch_cell(p).as_deref(),
+            Some(
+                Cell::CellFormula { .. }
+                    | Cell::ArrayFormula {
+                        kind: ArrayKind::Cse,
+                        ..
+                    }
+            )
+        ) && !state.is_pinned(key(p))
+    }
+
+    fn incr_read_content(&mut self, p: CellReferenceIndex, content: Content) -> CalcResult {
+        match content {
             Content::Empty | Content::Blank => CalcResult::EmptyCell,
             Content::Constant(constant) => self.constant_value(constant, p),
             Content::Formula {
-                f, pinned: Some(v), ..
+                pinned: Some(v), ..
             } => {
                 let state = self.incr_state();
                 if state.cycle_pins.borrow().contains(&key(p)) {
                     state.mark_tainted();
                 }
-                self.get_cell_value(&Cell::CellFormula { f, s: 0, v }, p)
+                self.formula_value(v, p)
             }
-            Content::Formula { f, .. } => {
+            Content::Formula { .. } => {
                 let v = self.incr_value(p).v;
-                self.get_cell_value(&Cell::CellFormula { f, s: 0, v }, p)
+                self.formula_value(v, p)
             }
             Content::Spill {
                 anchor,
@@ -127,6 +160,13 @@ impl Model<'_> {
             } => self.get_cell_value(&Cell::SpillCell { s: 0, a: anchor, v }, p),
             Content::Spill { anchor, .. } => self.incr_read_spill(p, anchor),
         }
+    }
+
+    /// What a formula cell holding `v` reads as.
+    fn formula_value(&self, v: FormulaValue, p: CellReferenceIndex) -> CalcResult {
+        // `get_cell_value` reads neither the formula nor the style of a
+        // formula cell.
+        self.get_cell_value(&Cell::CellFormula { f: 0, s: 0, v }, p)
     }
 
     /// A spill cell that is not pinned, which a CSE anchor writes.
@@ -142,13 +182,11 @@ impl Model<'_> {
                 ..
             } => {
                 let computed = self.incr_value(anchor_reference);
-                // Spills are in natural order, by row and then by column.
-                let written = computed.spills.as_deref().and_then(|spills| {
-                    let index = spills
-                        .binary_search_by_key(&(p.row, p.column), |(position, _)| *position)
-                        .ok()?;
-                    spills.get(index)
-                });
+                let spills = computed.spills();
+                let written = spills
+                    .binary_search_by_key(&(p.row, p.column), |(position, _)| *position)
+                    .ok()
+                    .and_then(|index| spills.get(index));
                 match written {
                     Some((_, v)) => self.get_cell_value(
                         &Cell::SpillCell {
@@ -284,29 +322,28 @@ impl Model<'_> {
     /// with its reads made through nodes, and the result planned as the
     /// shipped engine would store it.
     fn incr_compute(&mut self, p: CellReferenceIndex) -> Computed {
-        let Content::Formula { f, array, .. } = self.incr_content(p) else {
-            // Only a formula's value is read; a doomed frame's read of the
-            // content can still find the placeholder here.
-            return Computed {
-                v: FormulaValue::Unevaluated,
-                spills: None,
-            };
+        let state = self.incr_state();
+        state.computes.set(state.computes.get() + 1);
+        let content = self.incr_content(p);
+        let Content::Formula { f, ref array, .. } = content else {
+            return Computed::new(FormulaValue::Unevaluated, Vec::new()).reading_as(content);
         };
         let cell = FormulaCell {
             f,
             s: 0,
-            array: array.map(|(kind, area)| (kind == ArrayKind::Dynamic, area)),
+            array: array
+                .as_ref()
+                .map(|(kind, area)| (*kind == ArrayKind::Dynamic, *area)),
         };
         // As in `run_top`: a link an earlier run attached may rest on values
         // this run does not read.
         if !self.links.is_empty() {
             self.links.remove(&key(p));
         }
-        let state = self.incr_state();
         let frame = ComputeFrame::push(&state);
         let result = self.compute_formula(p, f);
         frame.close(key(p));
-        self.incr_computed(p, cell, &result)
+        self.incr_computed(p, cell, &result).reading_as(content)
     }
 
     /// The fallback of `value(p)` when it is found on a cycle.
@@ -315,14 +352,13 @@ impl Model<'_> {
         // on a cycle.
         let read = SheetRead::tracked();
         let cell = self.fetch_cell(p).as_deref().and_then(FormulaCell::of);
+        let content = self.content_on_sheet(p);
         drop(read);
         match cell {
             Some(cell) => self.incr_computed(p, cell, &circular_reference(p)),
-            None => Computed {
-                v: FormulaValue::Unevaluated,
-                spills: None,
-            },
+            None => Computed::new(FormulaValue::Unevaluated, Vec::new()),
         }
+        .reading_as(content)
     }
 
     fn incr_computed(
@@ -334,20 +370,18 @@ impl Model<'_> {
         match self.plan_result(p, cell, result) {
             Ok(plan) => {
                 let (v, spills) = plan.into_values();
-                Computed {
-                    v: v.unwrap_or(FormulaValue::Unevaluated),
-                    spills: (!spills.is_empty()).then(|| {
-                        spills
-                            .into_iter()
-                            .map(|(row, column, v)| ((row, column), v))
-                            .collect()
-                    }),
-                }
+                Computed::new(
+                    v.unwrap_or(FormulaValue::Unevaluated),
+                    spills
+                        .into_iter()
+                        .map(|(row, column, v)| ((row, column), v))
+                        .collect(),
+                )
             }
-            Err(message) => Computed {
-                v: FormulaValue::new_error(Error::ERROR, String::new(), message),
-                spills: None,
-            },
+            Err(message) => Computed::new(
+                FormulaValue::new_error(Error::ERROR, String::new(), message),
+                Vec::new(),
+            ),
         }
     }
 
