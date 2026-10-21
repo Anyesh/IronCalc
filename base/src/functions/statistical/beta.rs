@@ -1,6 +1,6 @@
 use statrs::distribution::{Beta, Continuous, ContinuousCDF};
 
-use super::inv_beta::inv_beta_reg;
+use super::inv_beta::beta_inverse_cdf;
 use crate::expressions::types::CellReferenceIndex;
 use crate::{
     calc_result::CalcResult, expressions::parser::Node, expressions::token::Error, model::Model,
@@ -194,7 +194,7 @@ impl<'a> Model<'a> {
             );
         }
 
-        let t = match inv_beta_reg(alpha, beta_param, p) {
+        let t = match beta_inverse_cdf(alpha, beta_param, p) {
             Some(t) if t.is_finite() => t,
             _ => {
                 return CalcResult::new_error(

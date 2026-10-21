@@ -1,5 +1,7 @@
 use statrs::distribution::{ChiSquared, Continuous, ContinuousCDF};
 
+use super::inv_beta::keep_statrs_root;
+use super::large_df::chi_squared_inverse_cdf;
 use crate::expressions::parser::ArrayNode;
 use crate::expressions::types::CellReferenceIndex;
 use crate::{
@@ -179,7 +181,11 @@ impl<'a> Model<'a> {
             }
         };
 
-        let x = dist.inverse_cdf(p);
+        let x = keep_statrs_root(
+            Some(dist.inverse_cdf(p)),
+            chi_squared_inverse_cdf(df, p, false),
+        )
+        .unwrap_or(f64::NAN);
 
         if x.is_nan() || x.is_infinite() || x < 0.0 {
             return CalcResult::new_error(
@@ -242,9 +248,12 @@ impl<'a> Model<'a> {
             }
         };
 
-        // Right-tail inverse: p = P(X > x) = SF(x) = 1 - CDF(x)
-        // So x = inverse_cdf(1 - p).
-        let x = dist.inverse_cdf(1.0 - p);
+        // statrs' right tail is inverse_cdf(1 - p), which rounds small p away.
+        let x = keep_statrs_root(
+            Some(dist.inverse_cdf(1.0 - p)),
+            chi_squared_inverse_cdf(df, p, true),
+        )
+        .unwrap_or(f64::NAN);
 
         if x.is_nan() || x.is_infinite() || x < 0.0 {
             return CalcResult::new_error(
