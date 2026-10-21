@@ -5,9 +5,9 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use incr_compute::{FxBuildHasher, Incr, Runtime};
+use incr_compute::{ErasedIncr, FxBuildHasher, Incr, Runtime};
 
-use super::nodes::{Dimension, Position};
+use super::nodes::{Computed, Dimension, Position};
 
 const PAGE_ROWS: i32 = 32;
 
@@ -55,6 +55,60 @@ impl<T: 'static> CellIndex<T> {
                 .or_insert_with(|| Box::new([None; PAGE_ROWS as usize]))[at] = Some(handle);
         }
         handle
+    }
+}
+
+/// The watched `value` nodes and their positions, found by node slot.
+#[derive(Default)]
+pub(crate) struct Watched {
+    /// Per node slot, one plus the index of its entry, or 0.
+    by_slot: Vec<u32>,
+    entries: Vec<(Incr<Computed>, Position)>,
+}
+
+impl Watched {
+    pub(crate) fn insert(&mut self, handle: Incr<Computed>, p: Position) {
+        let slot = handle.slot() as usize;
+        if self.by_slot.len() <= slot {
+            self.by_slot.resize(slot + 1, 0);
+        }
+        match self.by_slot[slot] {
+            0 => {
+                self.entries.push((handle, p));
+                self.by_slot[slot] = self.entries.len() as u32;
+            }
+            index => self.entries[index as usize - 1] = (handle, p),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn get(&self, handle: ErasedIncr) -> Option<(Incr<Computed>, Position)> {
+        let index = *self.by_slot.get(handle.slot() as usize)?;
+        let &(watched, p) = self.entries.get((index as usize).checked_sub(1)?)?;
+        (watched.erase() == handle).then_some((watched, p))
+    }
+
+    pub(crate) fn contains(&self, handle: ErasedIncr) -> bool {
+        self.get(handle).is_some()
+    }
+
+    /// True if `handle` was watched.
+    pub(crate) fn remove(&mut self, handle: ErasedIncr) -> bool {
+        if !self.contains(handle) {
+            return false;
+        }
+        let slot = handle.slot() as usize;
+        let index = self.by_slot[slot] as usize - 1;
+        self.by_slot[slot] = 0;
+        self.entries.swap_remove(index);
+        if let Some(&(moved, _)) = self.entries.get(index) {
+            self.by_slot[moved.slot() as usize] = index as u32 + 1;
+        }
+        true
+    }
+
+    pub(crate) fn positions(&self) -> Vec<Position> {
+        self.entries.iter().map(|&(_, p)| p).collect()
     }
 }
 

@@ -241,8 +241,17 @@ impl Model<'_> {
 
     /// `value(p)`, computed if it is not clean.
     pub(crate) fn incr_value(&mut self, p: CellReferenceIndex) -> Computed {
-        let state = self.incr_state();
         let handle = self.incr_value_node(p);
+        self.incr_value_of(p, handle)
+    }
+
+    /// `incr_value` with `value(p)`'s node in hand.
+    pub(crate) fn incr_value_of(
+        &mut self,
+        p: CellReferenceIndex,
+        handle: Incr<Computed>,
+    ) -> Computed {
+        let state = self.incr_state();
         let computed = {
             let _armed = ctx::arm(self);
             state.rt.get(handle)

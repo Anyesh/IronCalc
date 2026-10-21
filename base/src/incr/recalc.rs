@@ -263,7 +263,7 @@ impl Model<'_> {
     fn incr_watch(&self, state: &IncrState, p: Position) {
         let handle = self.incr_value_node(position(p));
         state.rt.watch(handle);
-        state.watched.borrow_mut().insert(handle.into(), p);
+        state.watched.borrow_mut().insert(handle, p);
     }
 
     fn incr_find_dynamic(&self, state: &IncrState) {
@@ -332,12 +332,12 @@ impl Model<'_> {
             match (&content, watched) {
                 (Content::Formula { .. }, None) => self.incr_watch(state, p),
                 (Content::Formula { .. }, Some(handle)) => {
-                    if !state.watched.borrow().contains_key(&handle.into()) {
+                    if !state.watched.borrow().contains(handle.into()) {
                         self.incr_watch(state, p);
                     }
                 }
                 (_, Some(handle)) => {
-                    if state.watched.borrow_mut().remove(&handle.into()).is_some() {
+                    if state.watched.borrow_mut().remove(handle.into()) {
                         rt.unwatch(handle);
                     }
                 }
@@ -412,11 +412,11 @@ impl Model<'_> {
                 break;
             }
             for handle in drained {
-                let Some(p) = state.watched.borrow().get(&handle).copied() else {
+                let Some((value, p)) = state.watched.borrow().get(handle) else {
                     continue;
                 };
                 state.newly_tainted.set(false);
-                let computed = self.incr_value(position(p));
+                let computed = self.incr_value_of(position(p), value);
                 reference |= state.newly_tainted.replace(false);
                 if let Some(cycle) = state.rt.cycle_of(handle) {
                     reference = true;
@@ -428,7 +428,7 @@ impl Model<'_> {
                             cycle
                                 .participants()
                                 .iter()
-                                .filter_map(|member| watched.get(member).copied())
+                                .filter_map(|&member| watched.get(member).map(|(_, p)| p))
                                 .collect()
                         };
                         for member in members {
@@ -471,7 +471,7 @@ impl Model<'_> {
         // The reference's circular set: what it stored as each one's own
         // circular reference, which the cycles the incremental evaluator
         // sees need not include where a dynamic anchor sits on the cycle.
-        let watched: Vec<Position> = state.watched.borrow().values().copied().collect();
+        let watched = state.watched.borrow().positions();
         for p in watched {
             let stored = match self.fetch_cell(position(p)).as_deref() {
                 Some(Cell::CellFormula { v, .. } | Cell::ArrayFormula { v, .. }) => v.clone(),
@@ -561,7 +561,7 @@ impl Model<'_> {
                 "the used area of sheet {sheet} changed with no change logged"
             );
         }
-        let watched: Vec<Position> = state.watched.borrow().values().copied().collect();
+        let watched = state.watched.borrow().positions();
         for p in watched {
             if state.is_pinned(p) {
                 continue;

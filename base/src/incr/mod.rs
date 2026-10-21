@@ -17,10 +17,10 @@ mod recalc;
 mod miri_tests;
 
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::rc::Rc;
 
-use incr_compute::{ErasedIncr, Incr, NodeTable, Runtime};
+use incr_compute::{Incr, NodeTable, Runtime};
 
 use crate::model::Model;
 use crate::types::FormulaValue;
@@ -58,7 +58,7 @@ pub(crate) struct IncrState {
     /// The frame and byte budgets last given to `rt`.
     budgets: Cell<(u32, usize)>,
     /// The formula positions with a watched `value` node, by that node.
-    pub(crate) watched: RefCell<HashMap<ErasedIncr, Position>>,
+    pub(crate) watched: RefCell<index::Watched>,
     /// Members of cycles the incremental evaluator found, pinned to what the
     /// reference stored: their readers take that from `content`.
     pub(crate) cycle_pins: RefCell<HashSet<Position>>,
