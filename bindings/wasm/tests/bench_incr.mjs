@@ -2,8 +2,10 @@
 // measured against its bound, one line each, and a nonzero exit if any row
 // misses. Edit timings are medians (and the chains p99) of INCR_GATE_RUNS
 // steps (default 200) against the median of as many reference steps; a first
-// evaluate is the median of 20 loads. Memory is the live heap the incremental
-// state adds, from the heap-count build. `make bench-incr` builds and runs it.
+// evaluate is the median of 20 loads. A ratio times each incremental step right
+// before a reference one, so a change in machine load reaches both sides alike.
+// Memory is the live heap the incremental state adds, from the heap-count
+// build. `make bench-incr` builds and runs it.
 //
 // The workbooks are those of base/benches/incr_common: chains (100k numbers
 // in A, 99k formulas in 100-row chains in B), a running sum (B1 = A1,
@@ -101,39 +103,74 @@ function alternating() {
 }
 
 // One edit of `row` by `edit` and the evaluate after it. Milliseconds.
-function editTimes(model, row, runs = RUNS, edit = alternating()) {
+function timedEdit(model, row, edit) {
+    const start = performance.now();
+    edit(model, row);
+    model.evaluate();
+    return performance.now() - start;
+}
+
+function editTimes(model, row) {
+    const edit = alternating();
     const times = [];
-    for (let run = 0; run < WARM_UP + runs; run++) {
-        const start = performance.now();
-        edit(model, row);
-        model.evaluate();
+    for (let run = 0; run < WARM_UP + RUNS; run++) {
+        const time = timedEdit(model, row, edit);
         if (run >= WARM_UP) {
-            times.push(performance.now() - start);
+            times.push(time);
         }
     }
     return times;
 }
 
-function editMedians(bytes, row) {
-    const incr = withMode(bytes, true);
-    const incrMedian = median(editTimes(incr, row));
-    incr.free();
-    const reference = withMode(bytes, false);
-    const referenceMedian = median(editTimes(reference, row));
-    reference.free();
-    return [incrMedian, referenceMedian];
+// The medians of `runs` incremental and `runs` reference steps, each step
+// returning its own time, taken one of each in turn after `warmUp` of each.
+function interleaved(incrStep, referenceStep, runs, warmUp) {
+    const incr = [];
+    const reference = [];
+    for (let run = 0; run < warmUp + runs; run++) {
+        const incrTime = incrStep();
+        const referenceTime = referenceStep();
+        if (run >= warmUp) {
+            incr.push(incrTime);
+            reference.push(referenceTime);
+        }
+    }
+    return [median(incr), median(reference)];
 }
 
-function firstEvaluate(bytes, incremental) {
-    const times = [];
-    for (let run = 0; run < LOAD_RUNS; run++) {
-        const model = load(bytes, incremental);
-        const start = performance.now();
-        model.evaluate();
-        times.push(performance.now() - start);
-        model.free();
-    }
-    return median(times);
+function editMedians(bytes, row) {
+    const incr = withMode(bytes, true);
+    const reference = withMode(bytes, false);
+    const incrEdit = alternating();
+    const referenceEdit = alternating();
+    const medians = interleaved(
+        () => timedEdit(incr, row, incrEdit),
+        () => timedEdit(reference, row, referenceEdit),
+        RUNS,
+        WARM_UP,
+    );
+    incr.free();
+    reference.free();
+    return medians;
+}
+
+// A load's first evaluate, the load itself untimed. Milliseconds.
+function timedFirstEvaluate(bytes, incremental) {
+    const model = load(bytes, incremental);
+    const start = performance.now();
+    model.evaluate();
+    const time = performance.now() - start;
+    model.free();
+    return time;
+}
+
+function firstEvaluateMedians(bytes) {
+    return interleaved(
+        () => timedFirstEvaluate(bytes, true),
+        () => timedFirstEvaluate(bytes, false),
+        LOAD_RUNS,
+        0,
+    );
 }
 
 let failed = 0;
@@ -163,7 +200,8 @@ function runningSumRows(label, bytes, rows) {
     atMost(`${label} edit the last row`, incr, 0.3);
     [incr, reference] = editMedians(bytes, rows / 2);
     ratio(`${label} edit the midpoint`, incr, reference, 0.8);
-    ratio(`${label} first evaluate`, firstEvaluate(bytes, true), firstEvaluate(bytes, false), 3.0);
+    [incr, reference] = firstEvaluateMedians(bytes);
+    ratio(`${label} first evaluate`, incr, reference, 3.0);
 }
 
 // Live heap the incremental state adds to an evaluated model, in bytes.
@@ -211,20 +249,23 @@ reference.free();
 const sumBytes = bytesOf(runningSum(ROWS));
 runningSumRows('running sum', sumBytes, ROWS);
 const anchorBytes = bytesOf(runningSum(ROWS, withAnchor));
-ratio(
-    'running sum with an anchor, first evaluate',
-    firstEvaluate(anchorBytes, true),
-    firstEvaluate(anchorBytes, false),
-    3.5,
-);
+ratio('running sum with an anchor, first evaluate', ...firstEvaluateMedians(anchorBytes), 3.5);
 
 const cycleBytes = bytesOf(runningSum(ROWS, withCycle));
 model = withMode(cycleBytes, true);
+const cycleReference = withMode(cycleBytes, false);
 const before = model.referenceRuns();
 // The deferred edits below go on from this editor: a fresh one could write
 // the value A1 already holds, and that edit runs nothing.
 const editA1 = alternating();
-const incr = median(editTimes(model, 1, RUNS, editA1));
+const referenceEdit = alternating();
+const cycleMedians = interleaved(
+    () => timedEdit(model, 1, editA1),
+    () => timedEdit(cycleReference, 1, referenceEdit),
+    RUNS,
+    WARM_UP,
+);
+cycleReference.free();
 if (model.referenceRuns() - before !== WARM_UP + RUNS) {
     throw new Error('every edit of A1 under the cycle must run the reference');
 }
@@ -246,9 +287,7 @@ if (model.referenceRuns() - deferredRuns !== 50) {
 }
 console.log(`      first edit of the last row after a reference recalc, median: ${ms(median(deferred))}`);
 model.free();
-const cycleReference = withMode(cycleBytes, false);
-ratio('reference recalc (an edit read by a cycle pin)', incr, median(editTimes(cycleReference, 1)), 1.3);
-cycleReference.free();
+ratio('reference recalc (an edit read by a cycle pin)', ...cycleMedians, 1.3);
 
 const perFormula = incrBytes(bytesOf(formulaColumn(ROWS))) / (ROWS - 1);
 const perConstant = (incrBytes(sumBytes) - perFormula * ROWS) / ROWS;
