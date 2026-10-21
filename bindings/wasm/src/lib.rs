@@ -1,3 +1,6 @@
+#[cfg(feature = "heap-count")]
+mod heap_count;
+
 use serde::Serialize;
 use wasm_bindgen::{
     prelude::{wasm_bindgen, JsError},
@@ -1398,6 +1401,20 @@ impl Model {
     #[wasm_bindgen(js_name = "setIncremental", skip_typescript)]
     pub fn set_incremental(&mut self, on: bool) {
         self.model.set_incremental(on);
+    }
+
+    /// How many `evaluate` calls fell back to the shipped evaluator.
+    #[doc(hidden)]
+    #[wasm_bindgen(js_name = "referenceRuns", skip_typescript)]
+    pub fn reference_runs(&self) -> Option<u32> {
+        ironcalc_base::incr_probe::counts(self.model.get_model()).map(|c| c.reference_runs)
+    }
+
+    /// The fingerprint check of a no-op `evaluate`; true if it matched.
+    #[doc(hidden)]
+    #[wasm_bindgen(js_name = "fingerprintCheck", skip_typescript)]
+    pub fn fingerprint_check(&self) -> bool {
+        ironcalc_base::incr_probe::fingerprint_check(self.model.get_model())
     }
 }
 

@@ -73,6 +73,12 @@ tests-incr:
 	wasm-pack build --release --target nodejs --out-dir pkg-nodejs-xlsx-incr -- --features xlsx,incr,mock_time
 	PKG_DIR=pkg-nodejs-xlsx-incr node tests/test_xlsx.mjs && PKG_DIR=pkg-nodejs-xlsx-incr node tests/test_incr_chain.mjs && PKG_DIR=pkg-nodejs-xlsx-incr node tests/test_incr.mjs
 
+# The T12 performance gate on Node (tests/bench_incr.mjs), on a release build
+# with the incremental evaluator and the live-heap counter.
+bench-incr:
+	wasm-pack build --release --target nodejs --out-dir pkg-nodejs-incr-bench -- --features incr,heap-count
+	PKG_DIR=pkg-nodejs-incr-bench node tests/bench_incr.mjs
+
 lint:
 	cargo check
 	cargo fmt -- --check
@@ -80,7 +86,7 @@ lint:
 
 clean:
 	cargo clean
-	rm -rf pkg pkg-xlsx pkg-nodejs pkg-nodejs-xlsx pkg-nodejs-incr pkg-nodejs-xlsx-incr
+	rm -rf pkg pkg-xlsx pkg-nodejs pkg-nodejs-xlsx pkg-nodejs-incr pkg-nodejs-xlsx-incr pkg-nodejs-incr-bench
 	rm -f types.js
 
-.PHONY: all wasm xlsx deps lint clean tests tests-incr
+.PHONY: all wasm xlsx deps lint clean tests tests-incr bench-incr
