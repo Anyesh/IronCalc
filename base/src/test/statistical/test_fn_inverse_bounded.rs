@@ -24,6 +24,9 @@ fn evaluate_bounded(formula: &'static str) -> Option<String> {
 fn test_fn_inverse_beta_family_terminates() {
     let cases = [
         "=T.INV(5E-101, 1000)",
+        // Excel's legacy FINV rejects df >= 1E10; F.INV.RT does not.
+        "=FINV(0.95, 1E10, 1)",
+        "=FINV(0.95, 1, 1E10)",
         "=BETA.INV(0.5, 1E10, 1E10)",
         "=BETAINV(0.5, 1E10, 1E10)",
     ];
