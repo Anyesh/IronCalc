@@ -3603,10 +3603,12 @@ impl<'a> Model<'a> {
     /// Sets whether a row is hidden
     #[inline]
     pub fn set_row_hidden(&mut self, sheet: u32, row: i32, hidden: bool) -> Result<(), String> {
-        self.workbook
-            .worksheet_mut(sheet)?
-            .set_row_hidden(row, hidden)?;
-        self.metadata_edited();
+        let worksheet = self.workbook.worksheet_mut(sheet)?;
+        let unchanged = worksheet.is_row_hidden(row)? == hidden;
+        worksheet.set_row_hidden(row, hidden)?;
+        if !unchanged {
+            self.metadata_edited();
+        }
         Ok(())
     }
 
