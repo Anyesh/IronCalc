@@ -80,7 +80,7 @@ impl ComputeFrame {
             if tainted.insert(p) {
                 self.state.newly_tainted.set(true);
             }
-        } else {
+        } else if !tainted.is_empty() {
             tainted.remove(&p);
         }
     }

@@ -20,7 +20,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use incr_compute::{Incr, NodeTable, Runtime};
+use incr_compute::{FxBuildHasher, Incr, NodeTable, Runtime};
 
 use crate::model::Model;
 use crate::types::FormulaValue;
@@ -61,12 +61,12 @@ pub(crate) struct IncrState {
     pub(crate) watched: RefCell<index::Watched>,
     /// Members of cycles the incremental evaluator found, pinned to what the
     /// reference stored: their readers take that from `content`.
-    pub(crate) cycle_pins: RefCell<HashSet<Position>>,
+    pub(crate) cycle_pins: RefCell<HashSet<Position, FxBuildHasher>>,
     /// The dynamic anchors and their spill cells as the last rebuild or
     /// reference recalc left them: their values are the reference's.
-    pub(crate) dynamic: RefCell<HashSet<Position>>,
+    pub(crate) dynamic: RefCell<HashSet<Position, FxBuildHasher>>,
     /// Formulas whose last compute read a cycle pin, or a tainted formula.
-    pub(crate) tainted: RefCell<HashSet<Position>>,
+    pub(crate) tainted: RefCell<HashSet<Position, FxBuildHasher>>,
     /// The value of each `dimension` node, readable without depending on it.
     pub(crate) dimensions: RefCell<index::Dimensions>,
     pub(crate) content_index: index::CellIndex<Content>,
