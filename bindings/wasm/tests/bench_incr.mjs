@@ -90,15 +90,22 @@ function quantile(samples, q) {
 
 const median = (samples) => quantile(samples, 0.5);
 
-// One edit of `row` in column A and the evaluate after it, alternating two
-// values so every edit changes the cell. Milliseconds.
-function editTimes(model, row, runs = RUNS) {
-    const times = [];
+// Edits a row in column A, alternating two values so every edit it makes
+// changes the cell.
+function alternating() {
     let flip = false;
-    for (let run = 0; run < WARM_UP + runs; run++) {
+    return (model, row) => {
         flip = !flip;
-        const start = performance.now();
         model.setUserInput(0, row, 1, String(flip ? -1 : row));
+    };
+}
+
+// One edit of `row` by `edit` and the evaluate after it. Milliseconds.
+function editTimes(model, row, runs = RUNS, edit = alternating()) {
+    const times = [];
+    for (let run = 0; run < WARM_UP + runs; run++) {
+        const start = performance.now();
+        edit(model, row);
         model.evaluate();
         if (run >= WARM_UP) {
             times.push(performance.now() - start);
@@ -214,7 +221,10 @@ ratio(
 const cycleBytes = bytesOf(runningSum(ROWS, withCycle));
 model = withMode(cycleBytes, true);
 const before = model.referenceRuns();
-const incr = median(editTimes(model, 1));
+// The deferred edits below go on from this editor: a fresh one could write
+// the value A1 already holds, and that edit runs nothing.
+const editA1 = alternating();
+const incr = median(editTimes(model, 1, RUNS, editA1));
 if (model.referenceRuns() - before !== WARM_UP + RUNS) {
     throw new Error('every edit of A1 under the cycle must run the reference');
 }
@@ -222,11 +232,12 @@ if (model.referenceRuns() - before !== WARM_UP + RUNS) {
 // none: this is what that recalc pays, beside the A1 row's cost.
 const deferred = [];
 const deferredRuns = model.referenceRuns();
+const editLast = alternating();
 for (let run = 0; run < 50; run++) {
-    model.setUserInput(0, 1, 1, String(run % 2 ? 1 : -1));
+    editA1(model, 1);
     model.evaluate();
     const start = performance.now();
-    model.setUserInput(0, ROWS, 1, String(run % 2 ? ROWS : -1));
+    editLast(model, ROWS);
     model.evaluate();
     deferred.push(performance.now() - start);
 }

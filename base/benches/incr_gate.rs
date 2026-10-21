@@ -108,10 +108,9 @@ fn with_mode(model: &Model, incremental: bool) -> Model<'static> {
     model
 }
 
-/// One edit of `row` and the `evaluate` after it, `runs` times after a
-/// warm-up.
-fn edit_times(model: &mut Model, row: i32, runs: usize) -> Vec<Duration> {
-    let mut editor = Editor::new();
+/// One edit of `row` by `editor` and the `evaluate` after it, `runs` times
+/// after a warm-up.
+fn edit_times(model: &mut Model, editor: &mut Editor, row: i32, runs: usize) -> Vec<Duration> {
     let mut times = Vec::with_capacity(runs);
     for run in 0..WARM_UP + runs {
         let start = Instant::now();
@@ -125,8 +124,18 @@ fn edit_times(model: &mut Model, row: i32, runs: usize) -> Vec<Duration> {
 }
 
 fn edit_medians(book: &Model, row: i32) -> (Duration, Duration) {
-    let incr = median(edit_times(&mut with_mode(book, true), row, incr_runs()));
-    let reference = median(edit_times(&mut with_mode(book, false), row, REFERENCE_RUNS));
+    let incr = median(edit_times(
+        &mut with_mode(book, true),
+        &mut Editor::new(),
+        row,
+        incr_runs(),
+    ));
+    let reference = median(edit_times(
+        &mut with_mode(book, false),
+        &mut Editor::new(),
+        row,
+        REFERENCE_RUNS,
+    ));
     (incr, reference)
 }
 
@@ -178,7 +187,12 @@ fn main() -> ExitCode {
 
     let book = chains(ROWS);
     let head = chain_head(ROWS / CHAIN / 2);
-    let times = edit_times(&mut with_mode(&book, true), head, incr_runs());
+    let times = edit_times(
+        &mut with_mode(&book, true),
+        &mut Editor::new(),
+        head,
+        incr_runs(),
+    );
     let p99 = quantile(times.clone(), 0.99);
     gate.at_most(
         "chains edit one head, median",
@@ -188,6 +202,7 @@ fn main() -> ExitCode {
     gate.at_most("chains edit one head, p99", p99, Duration::from_micros(500));
     let reference = median(edit_times(
         &mut with_mode(&book, false),
+        &mut Editor::new(),
         head,
         REFERENCE_RUNS,
     ));
@@ -239,7 +254,10 @@ fn main() -> ExitCode {
     let before = incr_probe::counts(&model)
         .expect("incremental")
         .reference_runs;
-    let incr = median(edit_times(&mut model, 1, incr_runs()));
+    // The deferred edits below go on from this editor: a fresh one could
+    // write the value A1 already holds, and that edit runs nothing.
+    let mut a1 = Editor::new();
+    let incr = median(edit_times(&mut model, &mut a1, 1, incr_runs()));
     let runs = incr_probe::counts(&model)
         .expect("incremental")
         .reference_runs
@@ -249,7 +267,12 @@ fn main() -> ExitCode {
         WARM_UP + incr_runs(),
         "every edit of A1 runs the reference"
     );
-    let reference = median(edit_times(&mut with_mode(&cycle, false), 1, REFERENCE_RUNS));
+    let reference = median(edit_times(
+        &mut with_mode(&cycle, false),
+        &mut Editor::new(),
+        1,
+        REFERENCE_RUNS,
+    ));
     gate.ratio(
         "reference recalc (an edit read by a cycle pin)",
         incr,
@@ -258,7 +281,6 @@ fn main() -> ExitCode {
     );
     // A reference recalc leaves the cone it reached to the next recalc that
     // needs none: this is what that recalc pays, beside the A1 row's cost.
-    let mut editor = Editor::new();
     let mut after = Editor::new();
     let before = incr_probe::counts(&model)
         .expect("incremental")
@@ -266,7 +288,7 @@ fn main() -> ExitCode {
     let deferred = median(
         (0..REFERENCE_RUNS)
             .map(|_| {
-                editor.edit(&mut model, 1);
+                a1.edit(&mut model, 1);
                 model.evaluate();
                 let start = Instant::now();
                 after.edit(&mut model, ROWS);
