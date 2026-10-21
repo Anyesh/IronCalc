@@ -3605,7 +3605,9 @@ impl<'a> Model<'a> {
     pub fn set_row_hidden(&mut self, sheet: u32, row: i32, hidden: bool) -> Result<(), String> {
         self.workbook
             .worksheet_mut(sheet)?
-            .set_row_hidden(row, hidden)
+            .set_row_hidden(row, hidden)?;
+        self.metadata_edited();
+        Ok(())
     }
 
     /// Returns whether a column is hidden

@@ -1054,6 +1054,7 @@ impl<'a> Model<'a> {
             }
         }
         self.workbook.worksheets[sheet as usize].rows = new_rows;
+        self.metadata_edited();
 
         // Links move with their cells
         displace_links(self.workbook.worksheet_mut(sheet)?, |r, c| {
@@ -1158,6 +1159,7 @@ impl<'a> Model<'a> {
             }
         }
         self.workbook.worksheets[sheet as usize].rows = new_rows;
+        self.metadata_edited();
 
         // Links move with their cells; the links of the deleted rows are removed
         displace_links(self.workbook.worksheet_mut(sheet)?, |r, c| {
@@ -1496,6 +1498,7 @@ impl<'a> Model<'a> {
             }
         }
         worksheet.rows = new_rows;
+        self.metadata_edited();
 
         // Re-attach the moved links, discarding any link the rebuild auto-created
         let worksheet = self.workbook.worksheet_mut(sheet)?;

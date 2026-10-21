@@ -579,6 +579,16 @@ impl<'a> Model<'a> {
         }
     }
 
+    /// Called by every mutator of the metadata the incremental evaluator
+    /// does not compare on each recalc: defined names, tables, hidden rows
+    /// and the formula lists. The next recalc rebuilds its state.
+    pub(crate) fn metadata_edited(&self) {
+        #[cfg(feature = "incr")]
+        if let Some(state) = &self.incr {
+            state.metadata_edited.set(true);
+        }
+    }
+
     /// The limit set by `set_max_evaluation_stack`.
     pub fn get_max_evaluation_stack(&self) -> usize {
         self.evaluation.max_stack
