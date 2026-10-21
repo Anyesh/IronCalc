@@ -1,5 +1,6 @@
 use statrs::distribution::{Beta, Continuous, ContinuousCDF};
 
+use super::inv_beta::inv_beta_reg;
 use crate::expressions::types::CellReferenceIndex;
 use crate::{
     calc_result::CalcResult, expressions::parser::Node, expressions::token::Error, model::Model,
@@ -188,25 +189,16 @@ impl<'a> Model<'a> {
             );
         }
 
-        let dist = match Beta::new(alpha, beta_param) {
-            Ok(d) => d,
-            Err(_) => {
+        let t = match inv_beta_reg(alpha, beta_param, p) {
+            Some(t) if t.is_finite() => t,
+            _ => {
                 return CalcResult::new_error(
                     Error::NUM,
                     cell,
-                    "Invalid parameters for Beta distribution".to_string(),
+                    "Invalid result for BETA.INV".to_string(),
                 )
             }
         };
-
-        let t = dist.inverse_cdf(p);
-        if t.is_nan() || t.is_infinite() {
-            return CalcResult::new_error(
-                Error::NUM,
-                cell,
-                "Invalid result for BETA.INV".to_string(),
-            );
-        }
 
         // Map back from [0,1] to [A,B]
         let x = a + t * (b - a);

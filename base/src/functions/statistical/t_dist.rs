@@ -1,5 +1,6 @@
 use statrs::distribution::{Continuous, ContinuousCDF, StudentsT};
 
+use super::inv_beta::students_t_inverse_cdf;
 use crate::expressions::types::CellReferenceIndex;
 use crate::{
     calc_result::CalcResult, expressions::parser::Node, expressions::token::Error, model::Model,
@@ -227,28 +228,14 @@ impl<'a> Model<'a> {
             };
         }
 
-        let dist = match StudentsT::new(0.0, 1.0, df) {
-            Ok(d) => d,
-            Err(_) => {
-                return CalcResult::Error {
-                    error: Error::NUM,
-                    origin: cell,
-                    message: "Invalid parameters for T.INV".to_string(),
-                }
-            }
-        };
-
-        let x = dist.inverse_cdf(p);
-
-        if !x.is_finite() {
-            return CalcResult::Error {
+        match students_t_inverse_cdf(df, p) {
+            Some(x) if x.is_finite() => CalcResult::Number(x),
+            _ => CalcResult::Error {
                 error: Error::NUM,
                 origin: cell,
                 message: "Invalid result for T.INV".to_string(),
-            };
+            },
         }
-
-        CalcResult::Number(x)
     }
 
     // T.INV.2T(probability, deg_freedom)
@@ -275,30 +262,16 @@ impl<'a> Model<'a> {
             };
         }
 
-        let dist = match StudentsT::new(0.0, 1.0, df) {
-            Ok(d) => d,
-            Err(_) => {
-                return CalcResult::Error {
-                    error: Error::NUM,
-                    origin: cell,
-                    message: "Invalid parameters for T.INV.2T".to_string(),
-                }
-            }
-        };
-
         // Two-sided: F(x) = 1 - p/2
         let target_cdf = 1.0 - p / 2.0;
-        let x = dist.inverse_cdf(target_cdf);
-
-        if !x.is_finite() {
-            return CalcResult::Error {
+        match students_t_inverse_cdf(df, target_cdf) {
+            Some(x) if x.is_finite() => CalcResult::Number(x.abs()),
+            _ => CalcResult::Error {
                 error: Error::NUM,
                 origin: cell,
                 message: "Invalid result for T.INV.2T".to_string(),
-            };
+            },
         }
-
-        CalcResult::Number(x.abs())
     }
 
     // T.TEST(array1, array2, tails, type)
