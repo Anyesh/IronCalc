@@ -219,25 +219,14 @@ fn same(a: &CalcResult, b: &CalcResult) -> bool {
     }
 }
 
-/// Evaluates with the reference, then checks that the incremental
-/// evaluator computes what the reference stored in each formula, and
-/// reads each other cell as the reference does.
+/// Evaluates incrementally, then checks that the read path gives each cell
+/// what the reference stored: a pinned formula reads its stored value.
 fn assert_matches_reference(model: &mut Model) {
     model.set_incremental(true);
     model.evaluate();
-    for (p, cell) in cells_of(model) {
-        match cell {
-            Cell::CellFormula { v, .. }
-            | Cell::ArrayFormula {
-                kind: ArrayKind::Cse,
-                v,
-                ..
-            } => assert_eq!(model.incr_value(p).v, v, "at {p:?}"),
-            _ => {
-                let stored = model.stored_value(p);
-                assert!(same(&model.incr_cell_value(p), &stored), "at {p:?}");
-            }
-        }
+    for (p, _) in cells_of(model) {
+        let stored = model.stored_value(p);
+        assert!(same(&model.incr_cell_value(p), &stored), "at {p:?}");
     }
 }
 
@@ -314,10 +303,8 @@ fn edit(model: &mut Model, cell: &str, input: &str) {
     if let Some(handle) = state.tile.get(rt, &tile_of(key)) {
         rt.set(handle, rt.get(handle) + 1);
     }
-    if let Some(handle) = state.dimension.get(rt, &p.sheet) {
-        let d = model.workbook.worksheets[p.sheet as usize].dimension();
-        rt.set(handle, (d.min_row, d.max_row, d.min_column, d.max_column));
-    }
+    let d = model.workbook.worksheets[p.sheet as usize].dimension();
+    state.set_dimension(p.sheet, (d.min_row, d.max_row, d.min_column, d.max_column));
 }
 
 fn incr_text(model: &mut Model, cell: &str) -> FormulaValue {

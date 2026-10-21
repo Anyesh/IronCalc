@@ -62,6 +62,8 @@ mod test_incr;
 mod test_incr_lockstep;
 #[cfg(feature = "incr")]
 mod test_incr_read_audit;
+#[cfg(feature = "incr")]
+mod test_incr_recalc;
 mod test_inverted_ranges;
 mod test_issue_623;
 mod test_math;
