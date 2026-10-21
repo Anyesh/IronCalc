@@ -2,11 +2,14 @@
 #![allow(clippy::panic)]
 
 use crate::calc_result::CalcResult;
+use crate::evaluation::FormulaCell;
 #[cfg(debug_assertions)]
 use crate::evaluation::SheetRead;
+use crate::expressions::parser::ArrayNode;
+use crate::expressions::token::Error;
 use crate::expressions::types::CellReferenceIndex;
 use crate::incr::ctx;
-use crate::incr::nodes::{tile_of, Constant, Content};
+use crate::incr::nodes::{tile_of, Computed, Constant, Content};
 use crate::model::Model;
 use crate::test::util::new_empty_model;
 use crate::types::{ArrayKind, Cell, FormulaValue, SpillValue};
@@ -529,4 +532,71 @@ fn a_content_node_is_a_text_constant_and_a_tag() {
         std::mem::size_of::<Constant>() + std::mem::size_of::<usize>(),
         "every constant's content slot pays for the widest variant and a tag"
     );
+}
+
+/// What `plan_result` plans for the formula `cell` at `p`, as a node value.
+fn planned(
+    model: &Model,
+    p: CellReferenceIndex,
+    cell: FormulaCell,
+    result: &CalcResult,
+) -> Computed {
+    let (v, spills) = model.plan_result(p, cell, result).unwrap().into_values();
+    Computed::new(
+        v.unwrap(),
+        spills
+            .into_iter()
+            .map(|(row, column, v)| ((row, column), v))
+            .collect(),
+    )
+}
+
+fn results_a_formula_gives(origin: CellReferenceIndex) -> Vec<CalcResult> {
+    vec![
+        CalcResult::Number(1.5),
+        CalcResult::Number(0.0),
+        CalcResult::Number(-0.0),
+        CalcResult::Number(f64::NAN),
+        CalcResult::Number(f64::INFINITY),
+        CalcResult::Number(f64::NEG_INFINITY),
+        CalcResult::Boolean(true),
+        CalcResult::Boolean(false),
+        CalcResult::String(String::new()),
+        CalcResult::String("text".to_string()),
+        CalcResult::new_error(Error::DIV, origin, "Divide by 0".to_string()),
+        CalcResult::new_error(Error::CIRC, origin, String::new()),
+        CalcResult::EmptyCell,
+        CalcResult::EmptyArg,
+        CalcResult::Array(vec![vec![ArrayNode::Number(-0.0)]]),
+        CalcResult::Array(vec![vec![ArrayNode::String(String::new())]]),
+    ]
+}
+
+#[test]
+fn a_formula_stores_what_plan_result_plans() {
+    let mut model = new_empty_model();
+    model._set("B2", "=1");
+    let p = model._parse_reference("B2");
+    let origin = model._parse_reference("D4");
+    let cells = [
+        FormulaCell {
+            f: 0,
+            s: 0,
+            array: None,
+        },
+        FormulaCell {
+            f: 0,
+            s: 0,
+            array: Some((false, (2, 3))),
+        },
+    ];
+    for cell in cells {
+        for (i, result) in results_a_formula_gives(origin).iter().enumerate() {
+            assert_eq!(
+                model.incr_computed(p, cell, result),
+                planned(&model, p, cell, result),
+                "{cell:?}, result {i}"
+            );
+        }
+    }
 }

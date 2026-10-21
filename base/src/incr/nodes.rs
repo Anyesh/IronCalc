@@ -122,6 +122,12 @@ struct Rare {
 }
 
 impl Computed {
+    /// A value with no spills that reads as itself.
+    #[inline]
+    pub(crate) fn scalar(v: FormulaValue) -> Computed {
+        Computed { v, rare: None }
+    }
+
     pub(crate) fn new(v: FormulaValue, spills: Vec<SpillWrite>) -> Computed {
         let rare = (!spills.is_empty()).then(|| {
             Arc::new(Rare {

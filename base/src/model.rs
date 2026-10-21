@@ -1183,51 +1183,7 @@ impl<'a> Model<'a> {
             }
         }
 
-        let formula_value = match result {
-            CalcResult::Number(value) => {
-                // safety belt
-                if value.is_nan() || value.is_infinite() {
-                    // This should never happen, is there a way we can log this events?
-                    return self.plan_result(
-                        cell_reference,
-                        cell,
-                        &CalcResult::Error {
-                            error: Error::NUM,
-                            origin: cell_reference,
-                            message: "".to_string(),
-                        },
-                    );
-                }
-                FormulaValue::Number(*value)
-            }
-            CalcResult::String(value) => FormulaValue::Text(value.clone()),
-            CalcResult::Boolean(value) => FormulaValue::Boolean(*value),
-            CalcResult::Error {
-                error,
-                origin,
-                message,
-            } => {
-                let o = match self.cell_reference_to_string(origin) {
-                    Ok(s) => s,
-                    Err(_) => "".to_string(),
-                };
-                FormulaValue::new_error(error.clone(), o, message.to_string())
-            }
-            CalcResult::Range { .. } => {
-                // This should never happen
-                debug_assert!(false, "Unexpected range result in non-array formula");
-                return Err("Cannot set a range as cell value".to_string());
-            }
-            CalcResult::EmptyCell | CalcResult::EmptyArg => {
-                // We treat empty cells as number 0.
-                return self.plan_result(cell_reference, cell, &CalcResult::Number(0.0));
-            }
-            // CalcResult::Array is handled before this match (see above); it always returns early.
-            CalcResult::Array(_) | CalcResult::Lambda(_) => {
-                debug_assert!(false, "Unexpected array result in non-array formula");
-                return Err("Unexpected array result in non-array formula".to_string());
-            }
-        };
+        let formula_value = self.scalar_formula_value(cell_reference, result)?;
 
         let mut plan = ResultPlan::new(cell_reference, None);
         if let Some((true, old_area)) = original_range {
@@ -1281,6 +1237,51 @@ impl<'a> Model<'a> {
             },
         });
         Ok(plan)
+    }
+
+    /// What a formula cell stores for a `result` that is not an array.
+    #[inline(always)]
+    pub(crate) fn scalar_formula_value(
+        &self,
+        cell_reference: CellReferenceIndex,
+        result: &CalcResult,
+    ) -> Result<FormulaValue, String> {
+        match result {
+            CalcResult::Number(value) if value.is_finite() => Ok(FormulaValue::Number(*value)),
+            // safety belt: this should never happen
+            CalcResult::Number(_) => Ok(self.error_formula_value(&Error::NUM, cell_reference, "")),
+            CalcResult::String(value) => Ok(FormulaValue::Text(value.clone())),
+            CalcResult::Boolean(value) => Ok(FormulaValue::Boolean(*value)),
+            CalcResult::Error {
+                error,
+                origin,
+                message,
+            } => Ok(self.error_formula_value(error, *origin, message)),
+            CalcResult::Range { .. } => {
+                // This should never happen
+                debug_assert!(false, "Unexpected range result in non-array formula");
+                Err("Cannot set a range as cell value".to_string())
+            }
+            // We treat empty cells as number 0.
+            CalcResult::EmptyCell | CalcResult::EmptyArg => Ok(FormulaValue::Number(0.0)),
+            // `plan_result` handles CalcResult::Array before it gets here.
+            CalcResult::Array(_) | CalcResult::Lambda(_) => {
+                debug_assert!(false, "Unexpected array result in non-array formula");
+                Err("Unexpected array result in non-array formula".to_string())
+            }
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn error_formula_value(
+        &self,
+        error: &Error,
+        origin: CellReferenceIndex,
+        message: &str,
+    ) -> FormulaValue {
+        let o = self.cell_reference_to_string(&origin).unwrap_or_default();
+        FormulaValue::new_error(error.clone(), o, message.to_string())
     }
 
     /// Plans the spill of `array` from the dynamic anchor at `anchor`, which

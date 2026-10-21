@@ -393,14 +393,19 @@ impl Model<'_> {
         .reading_as(content)
     }
 
-    fn incr_computed(
+    /// What the formula `cell` at `p` stores for `result`, as `plan_result`
+    /// plans it.
+    pub(crate) fn incr_computed(
         &self,
         p: CellReferenceIndex,
         cell: FormulaCell,
         result: &CalcResult,
     ) -> Computed {
-        match self.plan_result(p, cell, result) {
-            Ok(plan) => {
+        // A plain formula's plan holds `scalar_formula_value` alone.
+        let computed = if cell.array.is_none() && !matches!(result, CalcResult::Array(_)) {
+            self.scalar_formula_value(p, result).map(Computed::scalar)
+        } else {
+            self.plan_result(p, cell, result).map(|plan| {
                 let (v, spills) = plan.into_values();
                 Computed::new(
                     v.unwrap_or(FormulaValue::Unevaluated),
@@ -409,12 +414,14 @@ impl Model<'_> {
                         .map(|(row, column, v)| ((row, column), v))
                         .collect(),
                 )
-            }
-            Err(message) => Computed::new(
+            })
+        };
+        computed.unwrap_or_else(|message| {
+            Computed::new(
                 FormulaValue::new_error(Error::ERROR, String::new(), message),
                 Vec::new(),
-            ),
-        }
+            )
+        })
     }
 
     /// Depends on the tiles a read of a row from `first_column` to
