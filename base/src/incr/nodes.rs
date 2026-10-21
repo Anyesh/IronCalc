@@ -110,22 +110,67 @@ pub(crate) type SpillWrite = ((i32, i32), SpillValue);
 #[derive(Clone, Debug)]
 pub(crate) struct Computed {
     pub(crate) v: FormulaValue,
-    pub(crate) spills: Option<Arc<[SpillWrite]>>,
+    /// What only some positions have, behind one pointer: every formula
+    /// holds a `Computed`.
+    rare: Option<Arc<Rare>>,
+}
+
+#[derive(Debug)]
+struct Rare {
+    spills: Box<[SpillWrite]>,
+    read_as: Option<Content>,
+}
+
+impl Computed {
+    pub(crate) fn new(v: FormulaValue, spills: Vec<SpillWrite>) -> Computed {
+        let rare = (!spills.is_empty()).then(|| {
+            Arc::new(Rare {
+                spills: spills.into_boxed_slice(),
+                read_as: None,
+            })
+        });
+        Computed { v, rare }
+    }
+
+    /// `self` at a position whose `content(P)` is `content`. Unless that is a
+    /// formula whose value is not pinned, a reader of P takes `content`
+    /// instead of `v`, so that a reader of `value(P)` alone sees every change
+    /// of `content(P)` that changes its read.
+    pub(crate) fn reading_as(self, content: Content) -> Computed {
+        if let Content::Formula { pinned: None, .. } = content {
+            return self;
+        }
+        let rare = Rare {
+            spills: self.spills().into(),
+            read_as: Some(content),
+        };
+        Computed {
+            v: self.v,
+            rare: Some(Arc::new(rare)),
+        }
+    }
+
+    /// The spill cells of a CSE anchor, in natural order: by row, then by
+    /// column.
+    pub(crate) fn spills(&self) -> &[SpillWrite] {
+        self.rare.as_deref().map_or(&[], |rare| &rare.spills)
+    }
+
+    /// What a reader of P takes instead of `v`, if anything.
+    pub(crate) fn read_as(&self) -> Option<&Content> {
+        self.rare.as_deref()?.read_as.as_ref()
+    }
 }
 
 impl PartialEq for Computed {
     fn eq(&self, other: &Self) -> bool {
+        let (a, b) = (self.spills(), other.spills());
         same_formula_value(&self.v, &other.v)
-            && match (&self.spills, &other.spills) {
-                (None, None) => true,
-                (Some(a), Some(b)) => {
-                    a.len() == b.len()
-                        && a.iter()
-                            .zip(b.iter())
-                            .all(|((p, x), (q, y))| p == q && same_spill_value(x, y))
-                }
-                _ => false,
-            }
+            && a.len() == b.len()
+            && a.iter()
+                .zip(b.iter())
+                .all(|((p, x), (q, y))| p == q && same_spill_value(x, y))
+            && self.read_as() == other.read_as()
     }
 }
 

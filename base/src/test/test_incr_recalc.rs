@@ -84,6 +84,10 @@ impl Pair {
         self.incremental.incr.as_ref().unwrap().anchor_scans.get()
     }
 
+    fn computes(&self) -> u64 {
+        self.incremental.incr.as_ref().unwrap().computes.get()
+    }
+
     fn content_nodes(&self) -> usize {
         let state = self.incremental.incr.as_ref().unwrap();
         let mut count = 0;
@@ -149,6 +153,17 @@ fn a_cleared_formula_is_empty_to_its_readers() {
     assert_eq!(pair.text("B1"), "0");
     pair.set("A1", "=2+2");
     assert_eq!(pair.text("B1"), "40");
+}
+
+#[test]
+fn a_reader_of_a_formula_depends_on_its_value_alone() {
+    let mut pair = Pair::new();
+    pair.set("A1", "=1+1");
+    pair.set("B1", "=A1*10");
+    let computes = pair.computes();
+    pair.set("A1", "=4/2");
+    assert_eq!(pair.text("B1"), "20");
+    assert_eq!(pair.computes(), computes + 1);
 }
 
 #[test]

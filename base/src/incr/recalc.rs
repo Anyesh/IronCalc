@@ -23,9 +23,7 @@ use super::IncrState;
 use crate::expressions::types::CellReferenceIndex;
 use crate::model::Model;
 use crate::sheet_data::Change;
-#[cfg(debug_assertions)]
-use crate::types::FormulaValue;
-use crate::types::{ArrayKind, Cell, MergedCell, SheetState, Worksheet};
+use crate::types::{ArrayKind, Cell, FormulaValue, MergedCell, SheetState, Worksheet};
 
 /// What the state was built from besides the cells, as far as it is cheap
 /// to compare on every recalc. When it no longer matches, the state is
@@ -284,6 +282,7 @@ impl Model<'_> {
         state.reference_runs.set(old.reference_runs.get());
         state.rebuilds.set(old.rebuilds.get() + 1);
         state.tile_reads.set(old.tile_reads.get());
+        state.computes.set(old.computes.get());
         state.used_area_scans.set(old.used_area_scans.get());
         state.anchor_scans.set(old.anchor_scans.get());
         self.incr = Some(Rc::clone(&state));
@@ -643,12 +642,15 @@ impl Model<'_> {
         stored == self.incr_circular(position(p)).v
     }
 
-    fn incr_write_back(&mut self, p: CellReferenceIndex, computed: Computed) {
+    fn incr_write_back(&mut self, p: CellReferenceIndex, mut computed: Computed) {
         let Ok(worksheet) = self.workbook.worksheet_mut(p.sheet) else {
             return;
         };
         let v = match worksheet.sheet_data.cell_mut_value(p.row, p.column) {
-            Some(mut value) => match value.set_formula_value(computed.v) {
+            Some(mut value) => match value.set_formula_value(std::mem::replace(
+                &mut computed.v,
+                FormulaValue::Unevaluated,
+            )) {
                 Ok(()) => return,
                 Err(v) => v,
             },
@@ -669,7 +671,7 @@ impl Model<'_> {
                 kind: ArrayKind::Cse,
                 ..
             } => {
-                for ((row, column), v) in computed.spills.iter().flat_map(|s| s.iter()).cloned() {
+                for ((row, column), v) in computed.spills().iter().cloned() {
                     let s = worksheet.get_style(row, column);
                     let spill = Cell::SpillCell {
                         a: (p.row, p.column),
