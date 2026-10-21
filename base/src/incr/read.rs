@@ -30,7 +30,7 @@ impl IncrState {
     pub(crate) fn set_dimension(&self, sheet: u32, d: Dimension) {
         if let Some(handle) = self.dimension.get(&self.rt, &sheet) {
             self.rt.set(handle, d);
-            self.dimensions.borrow_mut().insert(sheet, d);
+            self.dimensions.borrow_mut().set(sheet, d, Some(handle));
         }
     }
 
@@ -80,7 +80,7 @@ impl ComputeFrame {
             if tainted.insert(p) {
                 self.state.newly_tainted.set(true);
             }
-        } else {
+        } else if !tainted.is_empty() {
             tainted.remove(&p);
         }
     }
@@ -204,9 +204,11 @@ impl Model<'_> {
             self.incr_read_dimension(p.sheet);
             return Content::Empty;
         }
-        let handle = state.content.get_or_insert_input(&state.rt, key(p), || {
-            let _read = SheetRead::tracked();
-            self.content_on_sheet(p)
+        let handle = state.content_index.get_or_insert(&state.rt, key(p), || {
+            state.content.get_or_insert_input(&state.rt, key(p), || {
+                let _read = SheetRead::tracked();
+                self.content_on_sheet(p)
+            })
         });
         state.rt.get(handle)
     }
@@ -239,8 +241,17 @@ impl Model<'_> {
 
     /// `value(p)`, computed if it is not clean.
     pub(crate) fn incr_value(&mut self, p: CellReferenceIndex) -> Computed {
-        let state = self.incr_state();
         let handle = self.incr_value_node(p);
+        self.incr_value_of(p, handle)
+    }
+
+    /// `incr_value` with `value(p)`'s node in hand.
+    pub(crate) fn incr_value_of(
+        &mut self,
+        p: CellReferenceIndex,
+        handle: Incr<Computed>,
+    ) -> Computed {
+        let state = self.incr_state();
         let computed = {
             let _armed = ctx::arm(self);
             state.rt.get(handle)
@@ -254,17 +265,19 @@ impl Model<'_> {
     /// `value(p)`'s node, created if there is none, without computing it.
     pub(crate) fn incr_value_node(&self, p: CellReferenceIndex) -> Incr<Computed> {
         let state = self.incr_state();
-        state.value.get_or_insert_query_with(
-            &state.rt,
-            key(p),
-            move |_| ctx::with_model(|model| model.incr_compute(p)),
-            QueryOpts {
-                cycle: CycleStrategy::fallback(move |_| {
-                    ctx::with_model(|model| model.incr_circular(p))
-                }),
-                replay: Replay::Allowed,
-            },
-        )
+        state.value_index.get_or_insert(&state.rt, key(p), || {
+            state.value.get_or_insert_query_with(
+                &state.rt,
+                key(p),
+                move |_| ctx::with_model(|model| model.incr_compute(p)),
+                QueryOpts {
+                    cycle: CycleStrategy::fallback(move |_| {
+                        ctx::with_model(|model| model.incr_circular(p))
+                    }),
+                    replay: Replay::Allowed,
+                },
+            )
+        })
     }
 
     /// The compute of `value(p)`: the shipped engine's run of the formula,
@@ -377,25 +390,25 @@ impl Model<'_> {
     /// The used area of a sheet, without depending on it; creates its
     /// `dimension` node.
     fn incr_dimension(&self, state: &IncrState, sheet: u32) -> (Incr<Dimension>, Dimension) {
-        let known = state.dimensions.borrow().get(&sheet).copied();
-        if let Some(d) = known {
-            return (
-                state.dimension.get_or_insert_input(&state.rt, sheet, || d),
-                d,
-            );
-        }
-        let d = {
-            let _read = SheetRead::tracked();
-            self.workbook
-                .worksheet(sheet)
-                .map(|worksheet| {
-                    let d = worksheet.dimension();
-                    (d.min_row, d.max_row, d.min_column, d.max_column)
-                })
-                .unwrap_or((1, 1, 1, 1)) as Dimension
+        let known = state.dimensions.borrow().get(sheet);
+        let d = match known {
+            Some((d, Some(handle))) => return (handle, d),
+            Some((d, None)) => d,
+            None => {
+                let _read = SheetRead::tracked();
+                self.workbook
+                    .worksheet(sheet)
+                    .map(|worksheet| {
+                        let d = worksheet.dimension();
+                        (d.min_row, d.max_row, d.min_column, d.max_column)
+                    })
+                    .unwrap_or((1, 1, 1, 1)) as Dimension
+            }
         };
         let handle = state.dimension.get_or_insert_input(&state.rt, sheet, || d);
-        state.dimensions.borrow_mut().insert(sheet, d);
+        // A doomed frame's miss returns a pending handle that names no node.
+        let alive = state.rt.is_alive(handle).then_some(handle);
+        state.dimensions.borrow_mut().set(sheet, d, alive);
         (handle, d)
     }
 

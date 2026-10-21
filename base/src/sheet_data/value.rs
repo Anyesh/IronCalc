@@ -1,6 +1,6 @@
 //! The value of a computed cell, to be changed without anything else about it.
 
-use crate::types::Cell;
+use crate::types::{Cell, FormulaValue};
 
 /// The value `v` of a formula, array formula or spill cell, to be written
 /// without logging the change (see `SheetData::cell_mut_value`). Nothing else
@@ -55,5 +55,17 @@ impl<'a> CellValueMut<'a> {
             (_, cell) => return Err(cell),
         }
         Ok(())
+    }
+
+    /// Takes `v` as the value of a formula cell. Any other cell, an array
+    /// formula included, is left as it is and `v` is given back.
+    pub fn set_formula_value(&mut self, v: FormulaValue) -> Result<(), FormulaValue> {
+        match &mut *self.0 {
+            Cell::CellFormula { v: old, .. } => {
+                *old = v;
+                Ok(())
+            }
+            _ => Err(v),
+        }
     }
 }
