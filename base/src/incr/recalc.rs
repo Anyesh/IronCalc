@@ -9,8 +9,10 @@
 //! recalc, and the members of the cycles found after it are pinned to the
 //! values it stored.
 
+#[cfg(debug_assertions)]
 use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeSet;
+#[cfg(debug_assertions)]
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
@@ -19,17 +21,61 @@ use super::IncrState;
 use crate::expressions::types::CellReferenceIndex;
 use crate::model::Model;
 use crate::sheet_data::Change;
-use crate::types::{ArrayKind, Cell, FormulaValue};
+#[cfg(debug_assertions)]
+use crate::types::FormulaValue;
+use crate::types::{ArrayKind, Cell, MergedCell, SheetState, Worksheet};
 
-/// What the state was built from besides the cells. When it no longer
-/// matches, the state is rebuilt.
+/// What the state was built from besides the cells, as far as it is cheap
+/// to compare on every recalc. When it no longer matches, the state is
+/// rebuilt. The rest (defined names, tables, hidden rows and the formula
+/// lists) changes only through mutators that call `Model::metadata_edited`,
+/// which a test build checks against `Untracked`.
 pub(crate) struct Fingerprint {
+    workbook_name: String,
+    tz: String,
+    locale_id: String,
+    locale: usize,
+    language: usize,
+    sheets: Vec<SheetFingerprint>,
+    #[cfg(debug_assertions)]
+    untracked: Untracked,
+}
+
+struct SheetFingerprint {
+    name: String,
+    sheet_id: u32,
+    state: SheetState,
+    merged_cells: Vec<MergedCell>,
+}
+
+impl SheetFingerprint {
+    fn of(worksheet: &Worksheet) -> SheetFingerprint {
+        SheetFingerprint {
+            name: worksheet.name.clone(),
+            sheet_id: worksheet.sheet_id,
+            state: worksheet.state.clone(),
+            merged_cells: worksheet.merged_cells.clone(),
+        }
+    }
+
+    fn matches(&self, worksheet: &Worksheet) -> bool {
+        self.name == worksheet.name
+            && self.sheet_id == worksheet.sheet_id
+            && self.state == worksheet.state
+            && self.merged_cells == worksheet.merged_cells
+    }
+}
+
+/// A hash of what `Fingerprint` leaves to `metadata_edited`.
+#[cfg(debug_assertions)]
+struct Untracked {
     metadata: u64,
     /// Per sheet, how many formulas it had and a hash of them: a sheet's
     /// formula list only grows while the indices into it stay valid.
     formulas: Vec<(usize, u64)>,
 }
 
+#[cfg(debug_assertions)]
 fn hash_of(value: impl Hash) -> u64 {
     let mut hasher = DefaultHasher::new();
     value.hash(&mut hasher);
@@ -47,14 +93,47 @@ fn position(p: Position) -> CellReferenceIndex {
 impl Model<'_> {
     fn fingerprint(&self) -> Fingerprint {
         let workbook = &self.workbook;
+        Fingerprint {
+            workbook_name: workbook.name.clone(),
+            tz: workbook.settings.tz.clone(),
+            locale_id: workbook.settings.locale.clone(),
+            locale: self.locale as *const _ as usize,
+            language: self.language as *const _ as usize,
+            sheets: workbook
+                .worksheets
+                .iter()
+                .map(SheetFingerprint::of)
+                .collect(),
+            #[cfg(debug_assertions)]
+            untracked: self.untracked(),
+        }
+    }
+
+    fn fingerprint_matches(&self, built: &Fingerprint) -> bool {
+        let workbook = &self.workbook;
+        let matches = workbook.name == built.workbook_name
+            && workbook.settings.tz == built.tz
+            && workbook.settings.locale == built.locale_id
+            && self.locale as *const _ as usize == built.locale
+            && self.language as *const _ as usize == built.language
+            && workbook.worksheets.len() == built.sheets.len()
+            && workbook
+                .worksheets
+                .iter()
+                .zip(&built.sheets)
+                .all(|(worksheet, sheet)| sheet.matches(worksheet));
+        #[cfg(debug_assertions)]
+        assert!(
+            !matches || self.untracked_matches(&built.untracked),
+            "metadata changed without metadata_edited"
+        );
+        matches
+    }
+
+    #[cfg(debug_assertions)]
+    fn untracked(&self) -> Untracked {
+        let workbook = &self.workbook;
         let mut hasher = DefaultHasher::new();
-        workbook.name.hash(&mut hasher);
-        (
-            format!("{:?}", workbook.settings),
-            self.locale as *const _ as usize,
-        )
-            .hash(&mut hasher);
-        (self.language as *const _ as usize).hash(&mut hasher);
         for name in &workbook.defined_names {
             (&name.name, &name.formula, name.sheet_id).hash(&mut hasher);
         }
@@ -65,13 +144,11 @@ impl Model<'_> {
             .collect();
         tables.hash(&mut hasher);
         for worksheet in &workbook.worksheets {
-            (&worksheet.name, worksheet.sheet_id).hash(&mut hasher);
-            format!("{:?}{:?}", worksheet.state, worksheet.merged_cells).hash(&mut hasher);
             for row in worksheet.rows.iter().filter(|row| row.hidden) {
                 row.r.hash(&mut hasher);
             }
         }
-        Fingerprint {
+        Untracked {
             metadata: hasher.finish(),
             formulas: workbook
                 .worksheets
@@ -81,10 +158,10 @@ impl Model<'_> {
         }
     }
 
-    fn fingerprint_matches(&self, built: &Fingerprint) -> bool {
-        let now = self.fingerprint();
-        now.metadata == built.metadata
-            && now.formulas.len() == built.formulas.len()
+    #[cfg(debug_assertions)]
+    fn untracked_matches(&self, built: &Untracked) -> bool {
+        self.untracked().metadata == built.metadata
+            && self.workbook.worksheets.len() == built.formulas.len()
             && self.workbook.worksheets.iter().zip(&built.formulas).all(
                 |(worksheet, &(len, hash))| {
                     worksheet.shared_formulas.len() >= len
@@ -106,11 +183,12 @@ impl Model<'_> {
     /// `evaluate` with the incremental evaluator on.
     pub(crate) fn incr_evaluate(&mut self) {
         let state = self.incr_state();
-        let current = state
-            .fingerprint
-            .borrow()
-            .as_ref()
-            .is_some_and(|built| self.fingerprint_matches(built));
+        let current = !state.metadata_edited.get()
+            && state
+                .fingerprint
+                .borrow()
+                .as_ref()
+                .is_some_and(|built| self.fingerprint_matches(built));
         let (state, mut reference) = if !current || self.a_row_changed() {
             // An anchor the edit removed is still in the order until the
             // reference drops it.
@@ -133,7 +211,6 @@ impl Model<'_> {
             self.evaluation.restarts_in_last_evaluation = 0;
             self.evaluate_conditional_formatting();
         }
-        *state.fingerprint.borrow_mut() = Some(self.fingerprint());
         #[cfg(debug_assertions)]
         self.incr_check(&state);
     }
@@ -149,6 +226,7 @@ impl Model<'_> {
         state.rebuilds.set(old.rebuilds.get() + 1);
         state.tile_reads.set(old.tile_reads.get());
         self.incr = Some(Rc::clone(&state));
+        *state.fingerprint.borrow_mut() = Some(self.fingerprint());
         let mut formulas = Vec::new();
         for (sheet, worksheet) in self.workbook.worksheets.iter_mut().enumerate() {
             worksheet.sheet_data.log_changes(true);
