@@ -1523,59 +1523,8 @@ impl<'a> Model<'a> {
                     CalcResult::new_error(Error::ERROR, cell_reference, message)
                 }
             }
-            CellFormula {
-                v: FormulaValue::Unevaluated,
-                ..
-            }
-            | ArrayFormula {
-                v: FormulaValue::Unevaluated,
-                ..
-            } => CalcResult::Error {
-                error: Error::ERROR,
-                origin: cell_reference,
-                message: "Unevaluated formula".to_string(),
-            },
-            CellFormula {
-                v: FormulaValue::Boolean(v),
-                ..
-            }
-            | ArrayFormula {
-                v: FormulaValue::Boolean(v),
-                ..
-            } => CalcResult::Boolean(*v),
-            CellFormula {
-                v: FormulaValue::Number(v),
-                ..
-            }
-            | ArrayFormula {
-                v: FormulaValue::Number(v),
-                ..
-            } => CalcResult::Number(*v),
-            CellFormula {
-                v: FormulaValue::Text(v),
-                ..
-            }
-            | ArrayFormula {
-                v: FormulaValue::Text(v),
-                ..
-            } => CalcResult::String(v.clone()),
-            CellFormula {
-                v: FormulaValue::Error { ei, d },
-                ..
-            }
-            | ArrayFormula {
-                v: FormulaValue::Error { ei, d },
-                ..
-            } => {
-                if let Some(cell_reference) = self.parse_reference(&d.o) {
-                    CalcResult::new_error(ei.clone(), cell_reference, d.m.clone())
-                } else {
-                    CalcResult::Error {
-                        error: ei.clone(),
-                        origin: cell_reference,
-                        message: ei.to_localized_error_string(self.language),
-                    }
-                }
+            CellFormula { v, .. } | ArrayFormula { v, .. } => {
+                self.formula_cell_value(v, cell_reference)
             }
             SpillCell {
                 v: SpillValue::Number(v),
@@ -1595,6 +1544,45 @@ impl<'a> Model<'a> {
             } => {
                 let message = ei.to_localized_error_string(self.language);
                 CalcResult::new_error(ei.clone(), cell_reference, message)
+            }
+        }
+    }
+
+    /// What a formula cell holding `v` reads as.
+    #[inline]
+    pub(crate) fn formula_cell_value(
+        &self,
+        v: &FormulaValue,
+        cell_reference: CellReferenceIndex,
+    ) -> CalcResult {
+        match v {
+            FormulaValue::Number(v) => CalcResult::Number(*v),
+            FormulaValue::Unevaluated => CalcResult::Error {
+                error: Error::ERROR,
+                origin: cell_reference,
+                message: "Unevaluated formula".to_string(),
+            },
+            FormulaValue::Boolean(v) => CalcResult::Boolean(*v),
+            FormulaValue::Text(v) => CalcResult::String(v.clone()),
+            FormulaValue::Error { ei, d } => self.stored_error_value(ei, d, cell_reference),
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn stored_error_value(
+        &self,
+        ei: &Error,
+        d: &ErrorDetails,
+        cell_reference: CellReferenceIndex,
+    ) -> CalcResult {
+        if let Some(cell_reference) = self.parse_reference(&d.o) {
+            CalcResult::new_error(ei.clone(), cell_reference, d.m.clone())
+        } else {
+            CalcResult::Error {
+                error: ei.clone(),
+                origin: cell_reference,
+                message: ei.to_localized_error_string(self.language),
             }
         }
     }

@@ -152,7 +152,7 @@ impl Model<'_> {
             let computed = self.incr_value(p);
             return match computed.read_as() {
                 Some(content) => self.incr_read_content(p, content.clone()),
-                None => self.formula_value(computed.v, p),
+                None => self.formula_cell_value(&computed.v, p),
             };
         }
         let content = self.incr_content(p);
@@ -189,11 +189,11 @@ impl Model<'_> {
                 if state.cycle_pins.borrow().contains(&key(p)) {
                     state.mark_tainted();
                 }
-                self.formula_value(*v, p)
+                self.formula_cell_value(&v, p)
             }
             Content::Formula { .. } => {
                 let v = self.incr_value(p).v;
-                self.formula_value(v, p)
+                self.formula_cell_value(&v, p)
             }
             Content::Spill {
                 anchor,
@@ -208,13 +208,6 @@ impl Model<'_> {
             ),
             Content::Spill { anchor, .. } => self.incr_read_spill(p, anchor),
         }
-    }
-
-    /// What a formula cell holding `v` reads as.
-    fn formula_value(&self, v: FormulaValue, p: CellReferenceIndex) -> CalcResult {
-        // `get_cell_value` reads neither the formula nor the style of a
-        // formula cell.
-        self.get_cell_value(&Cell::CellFormula { f: 0, s: 0, v }, p)
     }
 
     /// A spill cell that is not pinned, which a CSE anchor writes.
