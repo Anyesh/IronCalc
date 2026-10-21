@@ -16,7 +16,7 @@ use std::collections::BTreeSet;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-use super::nodes::{tile_of, Computed, Content, Position};
+use super::nodes::{tile_of, Computed, Content, Dimension, Position};
 use super::IncrState;
 use crate::expressions::types::CellReferenceIndex;
 use crate::model::Model;
@@ -237,6 +237,7 @@ impl Model<'_> {
         state.reference_runs.set(old.reference_runs.get());
         state.rebuilds.set(old.rebuilds.get() + 1);
         state.tile_reads.set(old.tile_reads.get());
+        state.used_area_scans.set(old.used_area_scans.get());
         self.incr = Some(Rc::clone(&state));
         *state.fingerprint.borrow_mut() = Some(self.fingerprint());
         let mut formulas = Vec::new();
@@ -304,9 +305,7 @@ impl Model<'_> {
             }
         }
         let mut reference = false;
-        let mut sheets = BTreeSet::new();
-        for p in touched {
-            sheets.insert(p.0);
+        for &p in &touched {
             reference |= state.is_pinned(p) || state.tainted.borrow().contains(&p);
             let content = self.content_on_sheet(position(p));
             if let Content::Formula {
@@ -342,11 +341,59 @@ impl Model<'_> {
                 (_, None) => {}
             }
         }
-        for sheet in sheets {
-            let d = self.workbook.worksheets[sheet as usize].dimension();
-            state.set_dimension(sheet, (d.min_row, d.max_row, d.min_column, d.max_column));
+        let known: Vec<(u32, Dimension)> = state
+            .dimensions
+            .borrow()
+            .iter()
+            .map(|(&sheet, &d)| (sheet, d))
+            .collect();
+        for (sheet, d) in known {
+            let edited = touched
+                .range((sheet, i32::MIN, i32::MIN)..=(sheet, i32::MAX, i32::MAX))
+                .map(|&(_, row, column)| (row, column));
+            let after = self.used_area_after(state, sheet, d, edited);
+            if after != d {
+                state.set_dimension(sheet, after);
+            }
         }
         reference
+    }
+
+    /// The used area of `sheet` after edits of `cells`, from `known`, the
+    /// area before them. A cell set outside it grows it; only a cell removed
+    /// on its edge, or an edit of a sheet `dimension` reported as A1 alone
+    /// (which it also reports for an empty sheet), walks every cell again.
+    fn used_area_after(
+        &self,
+        state: &IncrState,
+        sheet: u32,
+        known: Dimension,
+        cells: impl Iterator<Item = (i32, i32)>,
+    ) -> Dimension {
+        let worksheet = &self.workbook.worksheets[sheet as usize];
+        let (min_row, max_row, min_column, max_column) = known;
+        let mut area = known;
+        for (row, column) in cells {
+            let present = worksheet.sheet_data.cell(row, column).is_some();
+            if present && known != (1, 1, 1, 1) {
+                area = (
+                    area.0.min(row),
+                    area.1.max(row),
+                    area.2.min(column),
+                    area.3.max(column),
+                );
+            } else if present
+                || row == min_row
+                || row == max_row
+                || column == min_column
+                || column == max_column
+            {
+                state.used_area_scans.set(state.used_area_scans.get() + 1);
+                let d = worksheet.dimension();
+                return (d.min_row, d.max_row, d.min_column, d.max_column);
+            }
+        }
+        area
     }
 
     /// Computes the watched formulas that changes reached and writes their

@@ -32,6 +32,21 @@ impl Pair {
         self.evaluate();
     }
 
+    /// Removes the cell from both models and evaluates them.
+    fn remove(&mut self, cell: &str) {
+        let p = self.incremental._parse_reference(cell);
+        let area = Area {
+            sheet: p.sheet,
+            row: p.row,
+            column: p.column,
+            width: 1,
+            height: 1,
+        };
+        self.incremental.range_clear_all(&area).unwrap();
+        self.reference.range_clear_all(&area).unwrap();
+        self.evaluate();
+    }
+
     fn evaluate(&mut self) {
         self.incremental.evaluate();
         self.reference.evaluate();
@@ -44,6 +59,15 @@ impl Pair {
 
     fn tile_reads(&self) -> u64 {
         self.incremental.incr.as_ref().unwrap().tile_reads.get()
+    }
+
+    fn used_area_scans(&self) -> u64 {
+        self.incremental
+            .incr
+            .as_ref()
+            .unwrap()
+            .used_area_scans
+            .get()
     }
 
     fn content_nodes(&self) -> usize {
@@ -342,4 +366,22 @@ fn a_hidden_row_set_behind_the_models_back_is_caught() {
         .set_row_hidden(2, true)
         .unwrap();
     model.evaluate();
+}
+
+#[test]
+fn an_edit_scans_the_used_area_only_when_it_may_shrink() {
+    let mut pair = Pair::new();
+    pair.set("A1", "1");
+    pair.set("B1", "=A1+1");
+    pair.set("A1", "2");
+    assert_eq!(pair.used_area_scans(), 0, "nothing reads the used area");
+    pair.set("C1", "=SUM(A:A)");
+    pair.set("A5", "5");
+    pair.set("B3", "3");
+    pair.remove("B3");
+    assert_eq!(pair.used_area_scans(), 0, "growing, or removing inside");
+    pair.remove("A5");
+    assert_eq!(pair.used_area_scans(), 1, "removing the last row");
+    pair.set("A7", "7");
+    assert_eq!(pair.text("C1"), "9");
 }
