@@ -23,14 +23,10 @@ fn evaluate_bounded(formula: &'static str) -> Option<String> {
 #[test]
 fn test_fn_inverse_beta_family_terminates() {
     let cases = [
-        "=CONFIDENCE.T(0.05, 1, 1E10)",
-        "=T.INV(0.05, 1E10)",
-        "=T.INV.2T(0.05, 1E10)",
-        "=TINV(0.05, 1E10)",
         "=T.INV(5E-101, 1000)",
-        "=F.INV(0.05, 1E10, 1)",
-        "=F.INV.RT(0.95, 1E10, 1)",
+        // Excel's legacy FINV rejects df >= 1E10; F.INV.RT does not.
         "=FINV(0.95, 1E10, 1)",
+        "=FINV(0.95, 1, 1E10)",
         "=BETA.INV(0.5, 1E10, 1E10)",
         "=BETAINV(0.5, 1E10, 1E10)",
     ];
@@ -59,6 +55,45 @@ fn test_fn_inverse_beta_family_tiny_probability() {
         ("=BETA.INV(1E-200, 50, 2)", 9.243_775_378_285_472e-5),
         ("=T.INV(1E-200, 5)", -1.568_392_559_099_338e40),
         ("=F.INV(1E-200, 4, 6)", 6.123_724_356_957_945e-101),
+    ];
+    let mut model = new_empty_model();
+    for (row, (formula, _)) in cases.iter().enumerate() {
+        model._set(&format!("A{}", row + 1), formula);
+    }
+    model.evaluate();
+    let mut failures = Vec::new();
+    for (row, (formula, expected)) in cases.iter().enumerate() {
+        let reference = model._parse_reference(&format!("A{}", row + 1));
+        let value = model
+            .get_cell_value_by_index(reference.sheet, reference.row, reference.column)
+            .unwrap();
+        match value {
+            CellValue::Number(n) if ((n - expected) / expected).abs() <= 1e-12 => {}
+            other => failures.push(format!("{formula} gave {other:?}, expected {expected:e}")),
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+// Above a degrees-of-freedom threshold T and F quantiles come from asymptotic
+// expansions; expected values are mpmath quantiles at 50 digits.
+#[test]
+fn test_fn_inverse_large_degrees_of_freedom() {
+    let cases = [
+        ("=CONFIDENCE.T(0.05, 1, 1E10)", 1.959_963_984_777_281_4e-5),
+        ("=T.INV(0.05, 1E10)", -1.644_853_627_103_849_6),
+        ("=T.INV.2T(0.05, 1E10)", 1.959_963_984_777_281_4),
+        ("=TINV(0.05, 1E10)", 1.959_963_984_777_281_4),
+        ("=T.INV(0.025, 1E5)", -1.959_987_707_534_609_6),
+        ("=T.INV(1E-20, 1E8)", -9.262_342_099_516_875),
+        ("=T.INV(0.999, 3E7)", 3.090_232_577_838_802_5),
+        ("=F.INV(0.05, 1E10, 1)", 0.260_317_771_563_989_8),
+        ("=F.INV.RT(0.95, 1E10, 1)", 0.260_317_771_563_989_8),
+        ("=F.INV(0.05, 1, 1E10)", 0.003_932_140_000_216_903_3),
+        ("=F.INV(0.05, 5, 1E7)", 0.229_095_223_969_228_97),
+        ("=F.INV(0.95, 30, 1E7)", 1.459_100_211_574_359_3),
+        ("=F.INV(0.5, 1E7, 1E7)", 1.0),
+        ("=F.INV(1E-10, 1E10, 1E10)", 0.999_872_781_274_894_2),
     ];
     let mut model = new_empty_model();
     for (row, (formula, _)) in cases.iter().enumerate() {

@@ -1,5 +1,7 @@
 use statrs::function::beta::{checked_beta_reg, ln_beta};
 
+use super::large_df::{fisher_inverse_cdf_large_df, students_t_inverse_cdf_large_df};
+
 const MAX_ITERATIONS: usize = 1000;
 
 /// Inverse of the regularized incomplete beta function I_x(a, b), or `None`
@@ -149,16 +151,24 @@ fn inv_beta_reg_tiny(a: f64, b: f64, x: f64) -> Option<f64> {
     Some(f64::from_bits(above))
 }
 
-/// Quantile of Student's t with `df` degrees of freedom, as statrs computes it.
+/// Quantile of Student's t with `df` degrees of freedom: an asymptotic
+/// expansion for large df, otherwise as statrs computes it.
 pub(crate) fn students_t_inverse_cdf(df: f64, p: f64) -> Option<f64> {
+    if let Some(t) = students_t_inverse_cdf_large_df(df, p) {
+        return Some(t);
+    }
     let x1 = if p >= 0.5 { 1.0 - p } else { p };
     let y = inv_beta_reg(0.5 * df, 0.5, 2.0 * x1)?;
     let t = (df * (1. - y) / y).sqrt();
     Some(if p >= 0.5 { t } else { -t })
 }
 
-/// Quantile of the F distribution, as statrs computes it.
+/// Quantile of the F distribution: an asymptotic expansion for large df,
+/// otherwise as statrs computes it.
 pub(crate) fn fisher_inverse_cdf(df1: f64, df2: f64, p: f64) -> Option<f64> {
+    if let Some(f) = fisher_inverse_cdf_large_df(df1, df2, p) {
+        return Some(f);
+    }
     let z = inv_beta_reg(df1 / 2.0, df2 / 2.0, p)?;
     Some(df2 / (df1 * (1.0 / z - 1.0)))
 }

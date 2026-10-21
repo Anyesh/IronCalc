@@ -2750,7 +2750,7 @@ impl<'a> Model<'a> {
             Function::CritbinomCompat => self.fn_binom_inv(args, cell),
             Function::ExponDistCompat => self.fn_expon_dist(args, cell),
             Function::FDistCompat => self.fn_f_dist_rt(args, cell),
-            Function::FInvCompat => self.fn_f_inv_rt(args, cell),
+            Function::FInvCompat => self.fn_finv_compat(args, cell),
             Function::FTestCompat => self.fn_f_test(args, cell),
             Function::GammaDistCompat => self.fn_gamma_dist(args, cell),
             Function::GammaInvCompat => self.fn_gamma_inv(args, cell),
