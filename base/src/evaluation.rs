@@ -47,6 +47,8 @@ use crate::constants::{LAST_COLUMN, LAST_ROW};
 use crate::expressions::token::Error;
 use crate::expressions::types::CellReferenceIndex;
 use crate::model::Model;
+#[cfg(feature = "incr")]
+use crate::types::FormulaValue;
 use crate::types::{ArrayKind, Cell, Worksheet};
 
 /// The hasher of the maps the evaluation keeps about positions. Their keys are
@@ -371,6 +373,44 @@ impl RestartLog {
     }
 }
 
+/// Formula cells the last (completed) pass stored a `#CIRC!` value in, and
+/// whether it stored a dynamic anchor. Every pass stores every formula, so
+/// these cover the whole workbook.
+#[cfg(feature = "incr")]
+#[derive(Default)]
+pub(crate) struct StoredInPass {
+    pub(crate) circular: Vec<CellReferenceIndex>,
+    pub(crate) dynamic: bool,
+}
+
+#[cfg(feature = "incr")]
+impl StoredInPass {
+    /// Notes the cell a pass is about to store at `at`.
+    pub(crate) fn note(&mut self, at: CellReferenceIndex, cell: &Option<Cell>) {
+        match cell {
+            Some(Cell::CellFormula { v, .. } | Cell::ArrayFormula { v, .. })
+                if matches!(
+                    v,
+                    FormulaValue::Error {
+                        ei: Error::CIRC,
+                        ..
+                    }
+                ) =>
+            {
+                self.circular.push(at);
+            }
+            _ => {}
+        }
+        if let Some(Cell::ArrayFormula {
+            kind: ArrayKind::Dynamic,
+            ..
+        }) = cell
+        {
+            self.dynamic = true;
+        }
+    }
+}
+
 /// Everything the evaluation needs besides the workbook itself.
 pub(crate) struct Evaluation {
     /// The dynamic anchors, in the order in which they are evaluated. Kept
@@ -404,6 +444,10 @@ pub(crate) struct Evaluation {
     pub(crate) in_pass: bool,
     /// Number of restarts the last `evaluate()` needed. For tests and tuning.
     pub(crate) restarts_in_last_evaluation: u32,
+    /// What the current pass stored that the incremental evaluator's resync
+    /// would otherwise find by walking every formula.
+    #[cfg(feature = "incr")]
+    pub(crate) stored: StoredInPass,
     /// Number of formulas running right now, that is the depth of the
     /// recursion. It can be smaller than `stack.len()`: see `unwinding`.
     pub(crate) depth: usize,
@@ -466,6 +510,8 @@ impl Default for Evaluation {
             restart: None,
             in_pass: false,
             restarts_in_last_evaluation: 0,
+            #[cfg(feature = "incr")]
+            stored: StoredInPass::default(),
             depth: 0,
             max_depth: default_max_depth(),
             max_stack: DEFAULT_MAX_STACK,
@@ -728,6 +774,10 @@ impl<'a> Model<'a> {
         state.depth = 0;
         state.unwinding = false;
         state.circular = circular_anchors.iter().copied().collect();
+        #[cfg(feature = "incr")]
+        {
+            state.stored = StoredInPass::default();
+        }
         state.in_pass = true;
         // dynamic links (HYPERLINK) are rebuilt on every evaluation
         self.links.clear();

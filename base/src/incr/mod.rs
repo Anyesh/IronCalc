@@ -88,6 +88,8 @@ pub(crate) struct IncrState {
     pub(crate) tile_reads: Cell<u64>,
     /// Recalcs that walked every cell of a sheet to find its used area.
     pub(crate) used_area_scans: Cell<u64>,
+    /// Walks of every cell for the dynamic anchors and their spill cells.
+    pub(crate) anchor_scans: Cell<u64>,
 }
 
 impl IncrState {
@@ -124,6 +126,7 @@ impl IncrState {
             rebuilds: Cell::new(0),
             tile_reads: Cell::new(0),
             used_area_scans: Cell::new(0),
+            anchor_scans: Cell::new(0),
             rt,
         };
         state.follow_limits(max_depth, max_stack);

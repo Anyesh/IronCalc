@@ -241,6 +241,7 @@ impl Model<'_> {
         state.rebuilds.set(old.rebuilds.get() + 1);
         state.tile_reads.set(old.tile_reads.get());
         state.used_area_scans.set(old.used_area_scans.get());
+        state.anchor_scans.set(old.anchor_scans.get());
         self.incr = Some(Rc::clone(&state));
         *state.fingerprint.borrow_mut() = Some(self.fingerprint());
         let mut formulas = Vec::new();
@@ -267,6 +268,7 @@ impl Model<'_> {
     }
 
     fn incr_find_dynamic(&self, state: &IncrState) {
+        state.anchor_scans.set(state.anchor_scans.get() + 1);
         let dynamic = self
             .workbook
             .worksheets
@@ -471,19 +473,32 @@ impl Model<'_> {
     fn incr_resync(&mut self, state: &IncrState) {
         let old_pins: Vec<Position> = state.cycle_pins.borrow_mut().drain().collect();
         let old_dynamic: Vec<Position> = state.dynamic.borrow().iter().copied().collect();
-        self.incr_find_dynamic(state);
+        let stored = std::mem::take(&mut self.evaluation.stored);
+        // Every dynamic anchor is stored as one, so with none before and none
+        // stored there is none, nor a spill cell of one.
+        if !old_dynamic.is_empty() || stored.dynamic {
+            self.incr_find_dynamic(state);
+        }
         let new_dynamic: Vec<Position> = state.dynamic.borrow().iter().copied().collect();
         // The reference's circular set: what it stored as each one's own
         // circular reference, which the cycles the incremental evaluator
         // sees need not include where a dynamic anchor sits on the cycle.
-        let watched: Vec<Position> = state.watched.borrow().values().copied().collect();
-        for p in watched {
-            let stored = match self.fetch_cell(position(p)).as_deref() {
-                Some(Cell::CellFormula { v, .. } | Cell::ArrayFormula { v, .. }) => v.clone(),
-                _ => continue,
-            };
-            if stored == self.incr_circular(position(p)).v {
+        // Only a cell it stored `#CIRC!` in can hold that.
+        for cell in stored.circular {
+            let p = (cell.sheet, cell.row, cell.column);
+            if self.incr_stores_own_circular(state, p) {
                 state.cycle_pins.borrow_mut().insert(p);
+            }
+        }
+        #[cfg(debug_assertions)]
+        {
+            let watched: Vec<Position> = state.watched.borrow().values().copied().collect();
+            for p in watched {
+                assert_eq!(
+                    self.incr_stores_own_circular(state, p),
+                    state.cycle_pins.borrow().contains(&p),
+                    "the circular set the reference recorded misses {p:?}"
+                );
             }
         }
         let new_pins: Vec<Position> = state.cycle_pins.borrow().iter().copied().collect();
@@ -499,6 +514,22 @@ impl Model<'_> {
         // formula tainted just now, waits for the next recalc.
         self.incr_take_changes(state);
         self.incr_drain(state, true);
+    }
+
+    /// Whether the watched formula at `p` stores its own circular reference.
+    fn incr_stores_own_circular(&mut self, state: &IncrState, p: Position) -> bool {
+        let watched = state
+            .value
+            .get(&state.rt, &p)
+            .is_some_and(|handle| state.watched.borrow().contains_key(&handle.into()));
+        if !watched {
+            return false;
+        }
+        let stored = match self.fetch_cell(position(p)).as_deref() {
+            Some(Cell::CellFormula { v, .. } | Cell::ArrayFormula { v, .. }) => v.clone(),
+            _ => return false,
+        };
+        stored == self.incr_circular(position(p)).v
     }
 
     fn incr_write_back(&mut self, p: CellReferenceIndex, computed: Computed) {

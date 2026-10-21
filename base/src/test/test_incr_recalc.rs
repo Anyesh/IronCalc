@@ -70,6 +70,10 @@ impl Pair {
             .get()
     }
 
+    fn anchor_scans(&self) -> u64 {
+        self.incremental.incr.as_ref().unwrap().anchor_scans.get()
+    }
+
     fn content_nodes(&self) -> usize {
         let state = self.incremental.incr.as_ref().unwrap();
         let mut count = 0;
@@ -398,3 +402,39 @@ fn an_edit_scans_the_used_area_only_when_it_may_shrink() {
     pair.set("A7", "7");
     assert_eq!(pair.text("C1"), "9");
 }
+
+/// B(r) = B(r - 1) + A(r) over `rows` rows, with D1 = E1 + A1 and E1 = D1, a
+/// cycle that reads A1: once it is pinned, every edit of A1 runs the
+/// reference.
+fn running_sum_with_cycle(rows: i32) -> Pair {
+    let mut pair = Pair::new();
+    for row in 1..=rows {
+        pair.set(&format!("A{row}"), &row.to_string());
+        let formula = if row == 1 {
+            "=A1".to_string()
+        } else {
+            format!("=B{}+A{row}", row - 1)
+        };
+        pair.set(&format!("B{row}"), &formula);
+    }
+    pair.set("D1", "=E1+A1");
+    pair.set("E1", "=D1");
+    pair
+}
+
+#[test]
+fn a_reference_recalc_with_no_anchor_does_not_scan_for_anchors() {
+    let mut pair = running_sum_with_cycle(5);
+    let scans = pair.anchor_scans();
+    pair.set("A1", "100");
+    assert_eq!(pair.anchor_scans(), scans);
+    pair.set("C1", "=A1:A3");
+    assert_eq!(
+        pair.anchor_scans(),
+        scans + 1,
+        "the reference made an anchor"
+    );
+    pair.set("A2", "9");
+    assert_eq!(pair.text("C2"), "9");
+}
+
