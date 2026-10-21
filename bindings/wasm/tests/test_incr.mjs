@@ -23,6 +23,7 @@ function folders() {
         skip: [...(body.match(/skip:\s*&\[([^\]]*)\]/)[1].matchAll(/"([^"]+)"/g))].map((m) => m[1]),
     }));
     assert.ok(found.length > 0, 'no FOLDERS in xlsx/build.rs');
+    assert.strictEqual(found.length, list.match(/\bdir:/g).length, 'a FOLDERS entry was not read');
     return found;
 }
 
