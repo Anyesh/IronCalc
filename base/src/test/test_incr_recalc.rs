@@ -184,6 +184,18 @@ fn a_read_outside_the_used_area_needs_no_node_per_cell() {
 }
 
 #[test]
+fn a_zero_that_changes_sign_is_a_change() {
+    let mut pair = Pair::new();
+    pair.set("A1", "1");
+    pair.set("B1", "=A1*0");
+    pair.set("C1", "=B1");
+    pair.set("A1", "-1");
+    pair.set("D1", "0");
+    pair.set("E1", "=D1");
+    pair.set("D1", "-0");
+}
+
+#[test]
 fn a_cycle_runs_the_reference_and_matches_it() {
     let mut pair = Pair::new();
     pair.set("A1", "=B1+1");
