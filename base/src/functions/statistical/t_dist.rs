@@ -1,6 +1,6 @@
 use statrs::distribution::{Continuous, ContinuousCDF, StudentsT};
 
-use super::inv_beta::students_t_inverse_cdf;
+use super::inv_beta::{students_t_inverse_cdf, students_t_two_tailed_inverse};
 use crate::expressions::types::CellReferenceIndex;
 use crate::{
     calc_result::CalcResult, expressions::parser::Node, expressions::token::Error, model::Model,
@@ -262,10 +262,8 @@ impl<'a> Model<'a> {
             };
         }
 
-        // Two-sided: F(x) = 1 - p/2
-        let target_cdf = 1.0 - p / 2.0;
-        match students_t_inverse_cdf(df, target_cdf) {
-            Some(x) if x.is_finite() => CalcResult::Number(x.abs()),
+        match students_t_two_tailed_inverse(df, p) {
+            Some(x) if x.is_finite() => CalcResult::Number(x),
             _ => CalcResult::Error {
                 error: Error::NUM,
                 origin: cell,

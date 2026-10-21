@@ -1,6 +1,6 @@
 use statrs::distribution::{Continuous, ContinuousCDF, Normal};
 
-use super::inv_beta::students_t_inverse_cdf;
+use super::inv_beta::students_t_two_tailed_inverse;
 use crate::expressions::types::CellReferenceIndex;
 use crate::{
     calc_result::CalcResult, expressions::parser::Node, expressions::token::Error, model::Model,
@@ -299,8 +299,7 @@ impl<'a> Model<'a> {
 
         let df = size - 1.0;
 
-        // Two-sided CI => use 1 - alpha/2
-        let t_crit = match students_t_inverse_cdf(df, 1.0 - alpha / 2.0) {
+        let t_crit = match students_t_two_tailed_inverse(df, alpha) {
             Some(t) if t.is_finite() => t,
             _ => {
                 return CalcResult::Error {

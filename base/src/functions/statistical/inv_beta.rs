@@ -1,6 +1,9 @@
 use statrs::function::beta::{checked_beta_reg, ln_beta};
 
-use super::large_df::{fisher_inverse_cdf_large_df, students_t_inverse_cdf_large_df};
+use super::large_df::{
+    fisher_inverse_cdf_large_df, students_t_central_quantile_large_df,
+    students_t_inverse_cdf_large_df,
+};
 
 const MAX_ITERATIONS: usize = 1000;
 
@@ -186,15 +189,53 @@ fn below_root(a: f64, b: f64, x: f64, t: f64) -> Option<bool> {
 }
 
 /// Quantile of Student's t with `df` degrees of freedom: an asymptotic
-/// expansion for large df, otherwise as statrs computes it.
+/// expansion for large df, otherwise as statrs computes it except near the
+/// median.
 pub(crate) fn students_t_inverse_cdf(df: f64, p: f64) -> Option<f64> {
     if let Some(t) = students_t_inverse_cdf_large_df(df, p) {
         return Some(t);
     }
     let x1 = if p >= 0.5 { 1.0 - p } else { p };
-    let y = inv_beta_reg(0.5 * df, 0.5, 2.0 * x1)?;
-    let t = (df * (1. - y) / y).sqrt();
+    let t = students_t_magnitude(df, x1, 1.0 - 2.0 * x1)?;
     Some(if p >= 0.5 { t } else { -t })
+}
+
+/// The t >= 0 with P(|T| > t) = `alpha`.
+pub(crate) fn students_t_two_tailed_inverse(df: f64, alpha: f64) -> Option<f64> {
+    let central = 1.0 - alpha;
+    // Rounding 1 - alpha / 2 below costs t up to 2^-53 / central relative.
+    if central * T_TOLERANCE < f64::EPSILON / 2.0 {
+        if let Some(t) = students_t_central_quantile_large_df(df, central) {
+            return Some(t);
+        }
+    }
+    let p = 1.0 - alpha / 2.0;
+    if let Some(t) = students_t_inverse_cdf_large_df(df, p) {
+        return Some(t.abs());
+    }
+    students_t_magnitude(df, 1.0 - p, central)
+}
+
+/// Relative error past which the statrs route to a T quantile is replaced.
+const T_TOLERANCE: f64 = 1e-12;
+
+/// The t >= 0 with P(T < -t) = `tail`, `central` being 1 - 2 * tail without
+/// its rounding error.
+///
+/// Near the median the root y of I_y(df/2, 1/2) is close to 1, and an ulp of
+/// error in y costs t up to 2^-54 / (1 - y) relative. Past the tolerance t
+/// comes from `central` instead: by Hill's expansion at large df, otherwise
+/// from the root z = 1 - y of I_z(1/2, df/2) = central.
+fn students_t_magnitude(df: f64, tail: f64, central: f64) -> Option<f64> {
+    let y = inv_beta_reg(0.5 * df, 0.5, 2.0 * tail)?;
+    if (1.0 - y) * T_TOLERANCE < f64::EPSILON / 4.0 {
+        if let Some(t) = students_t_central_quantile_large_df(df, central) {
+            return Some(t);
+        }
+        let z = inv_beta_reg(0.5, 0.5 * df, central)?;
+        return Some((df * z / (1.0 - z)).sqrt());
+    }
+    Some((df * (1. - y) / y).sqrt())
 }
 
 /// Quantile of the F distribution: an asymptotic expansion for large df,

@@ -3,7 +3,7 @@
 //! difference of log-gammas near 1e11 for df = 1e10 and stops its continued
 //! fraction after 140 terms, so near the limit it is off in the fifth digit.
 
-use statrs::function::erf::erfc_inv;
+use statrs::function::erf::{erf_inv, erfc_inv};
 use statrs::function::gamma::{checked_gamma_lr, checked_gamma_ur, ln_gamma};
 
 /// Hill's expansion for Student's t is used from this df, and only while z²
@@ -12,6 +12,12 @@ use statrs::function::gamma::{checked_gamma_lr, checked_gamma_ur, ln_gamma};
 /// df = 1e5.
 const T_MIN_DF: f64 = 1e4;
 const T_MAX_Z2_PER_DF: f64 = 0.01;
+
+/// For the central quantiles near the median Hill's expansion is used from
+/// this df: its first omitted term, about z / (20 df⁵) there, is then below
+/// the relative error 2^-52 lnΓ(df/2) that statrs' ln_beta costs the beta
+/// route.
+const T_CENTRAL_MIN_DF: f64 = 3e2;
 
 /// F quantiles use an expansion only once the larger df reaches this; below
 /// it the beta route stays within about 1e-11.
@@ -43,7 +49,20 @@ pub(crate) fn students_t_inverse_cdf_large_df(df: f64, p: f64) -> Option<f64> {
         return None;
     }
     let tail = if p < 0.5 { p } else { 1.0 - p };
-    let z = normal_tail_quantile(tail);
+    let t = hill_expansion(df, normal_tail_quantile(tail))?;
+    Some(if p < 0.5 { -t } else { t })
+}
+
+/// The t with P(|T| <= t) = `central` by Hill's expansion, or `None` outside
+/// the region where it is accurate.
+pub(crate) fn students_t_central_quantile_large_df(df: f64, central: f64) -> Option<f64> {
+    if df < T_CENTRAL_MIN_DF {
+        return None;
+    }
+    hill_expansion(df, std::f64::consts::SQRT_2 * erf_inv(central))
+}
+
+fn hill_expansion(df: f64, z: f64) -> Option<f64> {
     let z2 = z * z;
     if z2.is_nan() || z2 > T_MAX_Z2_PER_DF * df {
         return None;
@@ -52,8 +71,7 @@ pub(crate) fn students_t_inverse_cdf_large_df(df: f64, p: f64) -> Option<f64> {
     let g2 = ((5.0 * z2 + 16.0) * z2 + 3.0) * z / 96.0;
     let g3 = (((3.0 * z2 + 19.0) * z2 + 17.0) * z2 - 15.0) * z / 384.0;
     let g4 = ((((79.0 * z2 + 776.0) * z2 + 1482.0) * z2 - 1920.0) * z2 - 945.0) * z / 92160.0;
-    let t = z + (g1 + (g2 + (g3 + g4 / df) / df) / df) / df;
-    Some(if p < 0.5 { -t } else { t })
+    Some(z + (g1 + (g2 + (g3 + g4 / df) / df) / df) / df)
 }
 
 /// F quantile for a large df, or `None` when neither expansion is accurate
