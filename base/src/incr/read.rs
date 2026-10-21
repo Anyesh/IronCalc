@@ -148,7 +148,7 @@ impl Model<'_> {
                 if state.cycle_pins.borrow().contains(&key(p)) {
                     state.mark_tainted();
                 }
-                self.formula_value(v, p)
+                self.formula_value(*v, p)
             }
             Content::Formula { .. } => {
                 let v = self.incr_value(p).v;
@@ -157,7 +157,14 @@ impl Model<'_> {
             Content::Spill {
                 anchor,
                 pinned: Some(v),
-            } => self.get_cell_value(&Cell::SpillCell { s: 0, a: anchor, v }, p),
+            } => self.get_cell_value(
+                &Cell::SpillCell {
+                    s: 0,
+                    a: anchor,
+                    v: *v,
+                },
+                p,
+            ),
             Content::Spill { anchor, .. } => self.incr_read_spill(p, anchor),
         }
     }
@@ -263,7 +270,7 @@ impl Model<'_> {
                 return Content::Formula {
                     f: *f,
                     array: None,
-                    pinned: Some(v.clone()),
+                    pinned: Some(Box::new(v.clone())),
                 };
             }
         }
