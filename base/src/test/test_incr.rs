@@ -298,7 +298,7 @@ fn edit(model: &mut Model, cell: &str, input: &str) {
     let state = model.incr.clone().unwrap();
     let rt = &state.rt;
     let key = (p.sheet, p.row, p.column);
-    if let Some(handle) = state.content.get(rt, &key) {
+    if let Some(handle) = state.content.get(rt, crate::incr::grid(key)) {
         rt.set(handle, model.content_on_sheet(p));
     }
     if let Some(handle) = state.tile.get(rt, &tile_of(key)) {
