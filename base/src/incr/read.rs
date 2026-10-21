@@ -7,16 +7,32 @@
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use incr_compute::{CycleStrategy, Incr, QueryOpts, Replay};
+use incr_compute::{CycleStrategy, Incr, QueryOpts, Replay, Runtime};
 
 use super::nodes::{tile_of, Computed, Constant, Content, Dimension, Position};
-use super::{ctx, IncrState};
+use super::{ctx, grid, IncrState};
 use crate::calc_result::CalcResult;
 use crate::evaluation::{circular_reference, key, FormulaCell, SheetRead};
 use crate::expressions::token::Error;
 use crate::expressions::types::CellReferenceIndex;
 use crate::model::Model;
 use crate::types::{ArrayKind, Cell, FormulaValue};
+
+/// The compute of `value(p)` and its options.
+pub(super) fn value_query(
+    p: CellReferenceIndex,
+) -> (
+    impl Fn(&Runtime) -> Computed + Send + Sync + 'static,
+    QueryOpts<Computed>,
+) {
+    (
+        move |_: &Runtime| ctx::with_model(|model| model.incr_compute(p)),
+        QueryOpts {
+            cycle: CycleStrategy::TypeFallback,
+            replay: Replay::Allowed,
+        },
+    )
+}
 
 impl IncrState {
     /// Whether the value at `p` is the reference's: a dynamic anchor or
@@ -249,12 +265,12 @@ impl Model<'_> {
             self.incr_read_dimension(p.sheet);
             return Content::Empty;
         }
-        let handle = state.content_index.get_or_insert(&state.rt, key(p), || {
-            state.content.get_or_insert_input(&state.rt, key(p), || {
+        let handle = state
+            .content
+            .get_or_insert_input(&state.rt, grid(key(p)), || {
                 let _read = SheetRead::tracked();
                 self.content_on_sheet(p)
-            })
-        });
+            });
         state.rt.get(handle)
     }
 
@@ -310,25 +326,20 @@ impl Model<'_> {
     /// `value(p)`'s node, created if there is none, without computing it.
     pub(crate) fn incr_value_node(&self, p: CellReferenceIndex) -> Incr<Computed> {
         let state = self.incr_state();
-        state.value_index.get_or_insert(&state.rt, key(p), || {
-            let handle = state.value.get_or_insert_query_with(
-                &state.rt,
-                key(p),
-                move |_| ctx::with_model(|model| model.incr_compute(p)),
-                QueryOpts {
-                    cycle: CycleStrategy::TypeFallback,
-                    replay: Replay::Allowed,
-                },
-            );
-            // A doomed frame's miss returns a pending handle that names no node.
-            if state.rt.is_alive(handle) {
-                state
-                    .value_positions
-                    .borrow_mut()
-                    .insert(handle.slot(), key(p));
-            }
-            handle
-        })
+        let mut created = false;
+        let handle = state
+            .value
+            .get_or_insert_query_lazy(&state.rt, grid(key(p)), || {
+                created = true;
+                value_query(p)
+            });
+        if created {
+            state
+                .value_positions
+                .borrow_mut()
+                .insert(handle.slot(), key(p));
+        }
+        handle
     }
 
     /// The fallback of a `value` node found on a cycle.

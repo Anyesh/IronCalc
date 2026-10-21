@@ -1,62 +1,10 @@
 //! Indices the hot paths read in place of hashed lookups. They hold handles
-//! of `IncrState`'s tables, which stay the creators; a handle kept here
-//! stays valid because the state never removes a node from its tables.
+//! of `IncrState`'s nodes; a handle kept here stays valid because the state
+//! never deletes a node.
 
-use std::cell::RefCell;
-use std::collections::HashMap;
-
-use incr_compute::{ErasedIncr, FxBuildHasher, Incr, Runtime};
+use incr_compute::{ErasedIncr, Incr};
 
 use super::nodes::{Computed, Dimension, Position};
-
-const PAGE_ROWS: i32 = 32;
-
-type Page<T> = [Option<Incr<T>>; PAGE_ROWS as usize];
-
-/// `(sheet, column, row / PAGE_ROWS)`.
-type PageKey = (u32, i32, i32);
-
-/// A table's live nodes by position, in pages of rows of one column, so that
-/// a walk down a column reads adjacent memory and a sparse sheet costs at
-/// most a page per node.
-pub(crate) struct CellIndex<T: 'static> {
-    pages: RefCell<HashMap<PageKey, Box<Page<T>>, FxBuildHasher>>,
-}
-
-impl<T: 'static> Default for CellIndex<T> {
-    fn default() -> Self {
-        CellIndex {
-            pages: RefCell::new(HashMap::with_hasher(FxBuildHasher)),
-        }
-    }
-}
-
-impl<T: 'static> CellIndex<T> {
-    /// The node at `p`, or the one `insert` finds or creates in the table.
-    #[inline]
-    pub(crate) fn get_or_insert(
-        &self,
-        rt: &Runtime,
-        p: Position,
-        insert: impl FnOnce() -> Incr<T>,
-    ) -> Incr<T> {
-        let (sheet, row, column) = p;
-        let page = (sheet, column, row.div_euclid(PAGE_ROWS));
-        let at = row.rem_euclid(PAGE_ROWS) as usize;
-        if let Some(handle) = self.pages.borrow().get(&page).and_then(|page| page[at]) {
-            return handle;
-        }
-        let handle = insert();
-        // A doomed frame's miss returns a pending handle that names no node.
-        if rt.is_alive(handle) {
-            self.pages
-                .borrow_mut()
-                .entry(page)
-                .or_insert_with(|| Box::new([None; PAGE_ROWS as usize]))[at] = Some(handle);
-        }
-        handle
-    }
-}
 
 /// The watched `value` nodes and their positions, found by node slot.
 #[derive(Default)]

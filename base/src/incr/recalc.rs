@@ -19,7 +19,8 @@ use std::rc::Rc;
 use incr_compute::ErasedIncr;
 
 use super::nodes::{tile_of, Computed, Content, Dimension, Position};
-use super::IncrState;
+use super::read::value_query;
+use super::{grid, IncrState};
 use crate::expressions::types::CellReferenceIndex;
 use crate::model::Model;
 use crate::sheet_data::Change;
@@ -297,9 +298,30 @@ impl Model<'_> {
                 }
             }
         }
-        for p in formulas {
-            self.incr_watch(&state, p);
+        // The first evaluate reads every formula's `content` and `value`
+        // nodes, so they are made here in two batches, not one by one.
+        let rt = &state.rt;
+        let contents = formulas
+            .iter()
+            .map(|&p| (grid(p), self.content_on_sheet(position(p))))
+            .collect();
+        state.content.insert_inputs(rt, contents);
+        let queries = formulas
+            .iter()
+            .map(|&p| {
+                let (compute, opts) = value_query(position(p));
+                (grid(p), compute, opts)
+            })
+            .collect();
+        let handles = state.value.insert_queries_watched(rt, queries);
+        let mut watched = state.watched.borrow_mut();
+        let mut positions = state.value_positions.borrow_mut();
+        positions.reserve(formulas.len());
+        for (p, handle) in formulas.into_iter().zip(handles) {
+            watched.insert(handle, p);
+            positions.insert(handle.slot(), p);
         }
+        drop((watched, positions));
         self.incr_find_dynamic(&state);
         state
     }
@@ -364,7 +386,7 @@ impl Model<'_> {
                 reference = true;
             }
             let rt = &state.rt;
-            if let Some(handle) = state.content.get(rt, &p) {
+            if let Some(handle) = state.content.get(rt, grid(p)) {
                 rt.set(handle, content.clone());
             }
             if let Some(handle) = state.tile.get(rt, &tile_of(p)) {
@@ -373,7 +395,7 @@ impl Model<'_> {
             if let Content::Formula { .. } = content {
                 state.pending.borrow_mut().push(p);
             }
-            let watched = state.value.get(rt, &p);
+            let watched = state.value.get(rt, grid(p));
             match (&content, watched) {
                 (Content::Formula { .. }, None) => self.incr_watch(state, p),
                 (Content::Formula { .. }, Some(handle)) => {
@@ -446,7 +468,7 @@ impl Model<'_> {
         reached.extend(state.rt.drain_dirtied_watched());
         let pending: Vec<Position> = state.pending.borrow_mut().drain(..).collect();
         for p in pending {
-            if let Some(handle) = state.value.get(&state.rt, &p) {
+            if let Some(handle) = state.value.get(&state.rt, grid(p)) {
                 reached.push(handle.into());
             }
         }
@@ -465,7 +487,7 @@ impl Model<'_> {
             .pending
             .borrow()
             .iter()
-            .filter_map(|p| state.value.get(&state.rt, p))
+            .filter_map(|p| state.value.get(&state.rt, grid(*p)))
             .map(ErasedIncr::from)
             .collect();
         let reached = self.incr_reached(state);
@@ -551,7 +573,7 @@ impl Model<'_> {
     }
 
     fn incr_refresh_content(&self, state: &IncrState, p: Position) {
-        if let Some(handle) = state.content.get(&state.rt, &p) {
+        if let Some(handle) = state.content.get(&state.rt, grid(p)) {
             state.rt.set(handle, self.content_on_sheet(position(p)));
         }
     }
@@ -617,7 +639,7 @@ impl Model<'_> {
         let mut deferred = state.deferred.borrow_mut();
         let mut carry = state.carry.borrow_mut();
         for p in held {
-            if let Some(handle) = state.value.get(&state.rt, &p) {
+            if let Some(handle) = state.value.get(&state.rt, grid(p)) {
                 let handle = ErasedIncr::from(handle);
                 if deferred.release(handle) {
                     carry.push(handle);
@@ -630,7 +652,7 @@ impl Model<'_> {
     fn incr_stores_own_circular(&mut self, state: &IncrState, p: Position) -> bool {
         let watched = state
             .value
-            .get(&state.rt, &p)
+            .get(&state.rt, grid(p))
             .is_some_and(|handle| state.watched.borrow().contains(handle.into()));
         if !watched {
             return false;
@@ -719,7 +741,7 @@ impl Model<'_> {
             // would make a debug build skip that path.
             let deferred = state
                 .value
-                .get(&state.rt, &p)
+                .get(&state.rt, grid(p))
                 .is_some_and(|handle| state.deferred.borrow().contains(handle.into()));
             if state.is_pinned(p) || deferred {
                 continue;
