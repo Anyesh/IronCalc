@@ -107,6 +107,7 @@ impl Watched {
         true
     }
 
+    #[cfg(debug_assertions)]
     pub(crate) fn positions(&self) -> Vec<Position> {
         self.entries.iter().map(|&(_, p)| p).collect()
     }

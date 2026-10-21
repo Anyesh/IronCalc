@@ -2,6 +2,7 @@
 #![allow(clippy::panic)]
 
 use crate::calc_result::CalcResult;
+#[cfg(debug_assertions)]
 use crate::evaluation::SheetRead;
 use crate::expressions::types::CellReferenceIndex;
 use crate::incr::ctx;
