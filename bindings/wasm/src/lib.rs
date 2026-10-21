@@ -1389,3 +1389,29 @@ impl Model {
         self.model.move_sheet(sheet, new_index).map_err(to_js_error)
     }
 }
+
+/// Test hooks for the incremental evaluator, left out of the typings.
+#[cfg(feature = "incr")]
+#[wasm_bindgen]
+impl Model {
+    #[doc(hidden)]
+    #[wasm_bindgen(js_name = "setIncremental", skip_typescript)]
+    pub fn set_incremental(&mut self, on: bool) {
+        self.model.set_incremental(on);
+    }
+}
+
+/// One seed of the lockstep differential over the workbook in `bytes`, at
+/// `depth` (none for the normal depth). A test hook, left out of the typings.
+#[cfg(all(feature = "xlsx", feature = "incr"))]
+#[doc(hidden)]
+#[wasm_bindgen(js_name = "lockstepXlsx", skip_typescript)]
+pub fn lockstep_xlsx(
+    bytes: &[u8],
+    name: &str,
+    seed: u32,
+    depth: Option<u32>,
+) -> Result<(), JsError> {
+    ironcalc::compare::lockstep_seed(bytes, name, seed.into(), depth.map(|d| d as usize))
+        .map_err(to_js_error)
+}

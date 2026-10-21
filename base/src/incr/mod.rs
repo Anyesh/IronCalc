@@ -18,6 +18,7 @@ use incr_compute::{ErasedIncr, Incr, NodeTable, Runtime};
 
 use crate::model::Model;
 use crate::types::FormulaValue;
+use crate::UserModel;
 use nodes::{Computed, Content, Dimension, Position};
 
 /// The frames a compute may nest before its reads replay. Each frame holds
@@ -150,5 +151,12 @@ impl Model<'_> {
     /// Whether `set_incremental(true)` is in effect.
     pub fn is_incremental(&self) -> bool {
         self.incr.is_some()
+    }
+}
+
+impl UserModel<'_> {
+    /// `Model::set_incremental` on the model this one edits.
+    pub fn set_incremental(&mut self, on: bool) {
+        self.model.set_incremental(on);
     }
 }

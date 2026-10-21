@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { Model } from '../pkg-nodejs-xlsx/wasm.js';
+const { Model } = await import(`../${process.env.PKG_DIR || 'pkg-nodejs-xlsx'}/wasm.js`);
 
 const exampleXlsx = readFileSync(
     path.join(

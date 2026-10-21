@@ -2,4 +2,6 @@ target/*
 pkg-xlsx/
 pkg-nodejs/
 pkg-nodejs-xlsx/
+pkg-nodejs-incr/
+pkg-nodejs-xlsx-incr/
 types.js

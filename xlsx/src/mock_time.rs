@@ -29,16 +29,27 @@ pub fn get_metadata_timestamp(model: &Model) -> Option<i64> {
 
 /// Mocks the engine clock to the timestamp stored in the METADATA sheet so
 /// that volatile functions (NOW, TODAY, ...) evaluate to the same values
-/// Excel saved. Workbooks without a timestamp use the actual system time.
+/// Excel saved. Workbooks without a timestamp use the actual system time,
+/// or on wasm32 the time already mocked.
 /// This module only exists behind the `mock_time` feature, which this
 /// crate's own tests enable through the self dev-dependency in Cargo.toml.
 pub fn set_mock_time_from_metadata(model: &Model) {
+    if let Some(milliseconds) = get_metadata_timestamp(model).or_else(system_time) {
+        ironcalc_base::mock_time::set_mock_time(milliseconds);
+    }
+}
+
+/// None on wasm32, which has no clock (`SystemTime::now` panics there): the
+/// mocked time then stays as it is.
+fn system_time() -> Option<i64> {
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     #[allow(clippy::unwrap_used)]
-    let milliseconds = get_metadata_timestamp(model).unwrap_or_else(|| {
+    return Some(
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_millis() as i64
-    });
-    ironcalc_base::mock_time::set_mock_time(milliseconds);
+            .as_millis() as i64,
+    );
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    None
 }
