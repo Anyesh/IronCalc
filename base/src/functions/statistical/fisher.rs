@@ -1,4 +1,5 @@
 use statrs::distribution::{Continuous, ContinuousCDF, FisherSnedecor};
+use statrs::function::beta::checked_beta_reg;
 
 use super::inv_beta::fisher_inverse_cdf;
 use crate::expressions::types::CellReferenceIndex;
@@ -6,6 +7,17 @@ use crate::functions::statistical::t_dist::sample_var;
 use crate::{
     calc_result::CalcResult, expressions::parser::Node, expressions::token::Error, model::Model,
 };
+
+// statrs' cdf evaluates d1 * x / (d1 * x + d2) and panics on the NaN it gets once
+// d1 * x overflows; dividing through by d1 * x keeps the same argument finite.
+fn f_cdf(dist: &FisherSnedecor, x: f64) -> f64 {
+    let (d1, d2) = (dist.freedom_1(), dist.freedom_2());
+    if x.is_finite() && (d1 * x).is_infinite() {
+        checked_beta_reg(d1 / 2.0, d2 / 2.0, 1.0 / (1.0 + d2 / d1 / x)).unwrap_or(f64::NAN)
+    } else {
+        dist.cdf(x)
+    }
+}
 
 impl<'a> Model<'a> {
     // FISHER(x) = 0.5 * ln((1 + x) / (1 - x))
@@ -114,7 +126,11 @@ impl<'a> Model<'a> {
             }
         };
 
-        let result = if cumulative { dist.cdf(x) } else { dist.pdf(x) };
+        let result = if cumulative {
+            f_cdf(&dist, x)
+        } else {
+            dist.pdf(x)
+        };
 
         if result.is_nan() || result.is_infinite() {
             return CalcResult::new_error(
@@ -174,7 +190,7 @@ impl<'a> Model<'a> {
         };
 
         // Right-tail probability: P(F > x) = 1 - CDF(x)
-        let result = 1.0 - dist.cdf(x);
+        let result = 1.0 - f_cdf(&dist, x);
 
         if result.is_nan() || result.is_infinite() || result < 0.0 {
             return CalcResult::new_error(
@@ -372,7 +388,7 @@ impl<'a> Model<'a> {
         };
 
         // One-tailed right-tail probability
-        let tail = 1.0 - dist.cdf(f);
+        let tail = 1.0 - f_cdf(&dist, f);
         // F.TEST is two-tailed: p = 2 * tail (with F >= 1)
         let mut p = 2.0 * tail;
 

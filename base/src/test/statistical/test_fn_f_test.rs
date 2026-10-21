@@ -33,3 +33,22 @@ fn test_fn_f_test_sanity() {
     assert_eq!(model._get_text("A8"), *"#ERROR!");
     assert_eq!(model._get_text("A9"), *"#ERROR!");
 }
+
+// The variance ratio is about 1E306, so d1 * F overflows inside statrs' cdf.
+#[test]
+fn test_fn_f_test_overflowing_ratio() {
+    let mut model = new_empty_model();
+
+    for row in 1..=200 {
+        let sign = if row % 2 == 0 { "" } else { "-" };
+        model._set(&format!("A{row}"), &format!("{sign}1E152"));
+    }
+    model._set("B1", "0");
+    model._set("B2", "0.1");
+    model._set("B3", "0.2");
+    model._set("C1", "=F.TEST(A1:A200, B1:B3)");
+
+    model.evaluate();
+
+    assert_eq!(model._get_text("C1"), *"0");
+}

@@ -93,9 +93,14 @@ impl<'a> Model<'a> {
             );
         }
 
-        // Transform to standard Beta(0,1)
+        // Transform to standard Beta(0,1). Once B - A overflows, halving every term keeps
+        // inf / inf out of statrs' cdf, which panics on the NaN.
         let width = b - a;
-        let t = (x - a) / width;
+        let t = if width.is_finite() {
+            (x - a) / width
+        } else {
+            (x / 2.0 - a / 2.0) / (b / 2.0 - a / 2.0)
+        };
 
         let dist = match Beta::new(alpha, beta_param) {
             Ok(d) => d,
