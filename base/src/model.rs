@@ -1040,6 +1040,10 @@ impl<'a> Model<'a> {
         result: &CalcResult,
     ) -> Result<(), String> {
         let plan = self.plan_result(cell_reference, cell, result)?;
+        #[cfg(feature = "incr")]
+        if self.evaluation.in_pass {
+            self.evaluation.stored.note(cell_reference, &plan.cell);
+        }
         self.apply_result(plan)
     }
 

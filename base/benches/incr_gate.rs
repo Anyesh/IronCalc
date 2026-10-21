@@ -256,6 +256,34 @@ fn main() -> ExitCode {
         reference,
         1.3,
     );
+    // A reference recalc leaves the cone it reached to the next recalc that
+    // needs none: this is what that recalc pays, beside the A1 row's cost.
+    let mut editor = Editor::new();
+    let mut after = Editor::new();
+    let before = incr_probe::counts(&model)
+        .expect("incremental")
+        .reference_runs;
+    let deferred = median(
+        (0..REFERENCE_RUNS)
+            .map(|_| {
+                editor.edit(&mut model, 1);
+                model.evaluate();
+                let start = Instant::now();
+                after.edit(&mut model, ROWS);
+                model.evaluate();
+                start.elapsed()
+            })
+            .collect(),
+    );
+    assert_eq!(
+        (incr_probe::counts(&model)
+            .expect("incremental")
+            .reference_runs
+            - before) as usize,
+        REFERENCE_RUNS,
+        "only the edits of A1 may run the reference"
+    );
+    println!("      first edit of the last row after a reference recalc, median: {deferred:.3?}");
     drop((cycle, model));
 
     let column = incr_bytes(&formula_column(ROWS));

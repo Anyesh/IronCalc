@@ -70,6 +70,20 @@ impl Pair {
             .get()
     }
 
+    fn deferred(&self) -> usize {
+        self.incremental
+            .incr
+            .as_ref()
+            .unwrap()
+            .deferred
+            .borrow()
+            .len()
+    }
+
+    fn anchor_scans(&self) -> u64 {
+        self.incremental.incr.as_ref().unwrap().anchor_scans.get()
+    }
+
     fn content_nodes(&self) -> usize {
         let state = self.incremental.incr.as_ref().unwrap();
         let mut count = 0;
@@ -397,4 +411,71 @@ fn an_edit_scans_the_used_area_only_when_it_may_shrink() {
     assert_eq!(pair.used_area_scans(), 1, "removing the last row");
     pair.set("A7", "7");
     assert_eq!(pair.text("C1"), "9");
+}
+
+/// B(r) = B(r - 1) + A(r) over `rows` rows, with D1 = E1 + A1 and E1 = D1, a
+/// cycle that reads A1: once it is pinned, every edit of A1 runs the
+/// reference.
+fn running_sum_with_cycle(rows: i32) -> Pair {
+    let mut pair = Pair::new();
+    for row in 1..=rows {
+        pair.set(&format!("A{row}"), &row.to_string());
+        let formula = if row == 1 {
+            "=A1".to_string()
+        } else {
+            format!("=B{}+A{row}", row - 1)
+        };
+        pair.set(&format!("B{row}"), &formula);
+    }
+    pair.set("D1", "=E1+A1");
+    pair.set("E1", "=D1");
+    pair
+}
+
+#[test]
+fn a_reference_recalc_leaves_the_cone_it_reached_to_the_next_recalc() {
+    let mut pair = running_sum_with_cycle(20);
+    let runs = pair.reference_runs();
+    pair.set("A1", "100");
+    assert_eq!(pair.reference_runs(), runs + 1);
+    assert_eq!(pair.deferred(), 20, "B1:B20 are the reference's");
+    pair.set("A1", "200");
+    assert_eq!(pair.reference_runs(), runs + 2);
+    assert_eq!(pair.deferred(), 20);
+    pair.set("A20", "7");
+    assert_eq!(pair.reference_runs(), runs + 2);
+    assert_eq!(pair.deferred(), 0);
+    assert_eq!(pair.text("B20"), "396");
+}
+
+#[test]
+fn a_reference_recalc_with_no_anchor_does_not_scan_for_anchors() {
+    let mut pair = running_sum_with_cycle(5);
+    let scans = pair.anchor_scans();
+    pair.set("A1", "100");
+    assert_eq!(pair.anchor_scans(), scans);
+    pair.set("C1", "=A1:A3");
+    assert_eq!(
+        pair.anchor_scans(),
+        scans + 1,
+        "the reference made an anchor"
+    );
+    pair.set("A2", "9");
+    assert_eq!(pair.text("C2"), "9");
+}
+
+#[test]
+fn a_cycle_the_reference_finds_among_deferred_formulas_is_pinned_now() {
+    let mut pair = running_sum_with_cycle(5);
+    pair.set("G1", "=IF(A1>150,H1,0)");
+    pair.set("H1", "=G1");
+    let runs = pair.reference_runs();
+    pair.set("A1", "200");
+    assert_eq!(pair.reference_runs(), runs + 1);
+    pair.set("A5", "9");
+    assert_eq!(
+        pair.reference_runs(),
+        runs + 1,
+        "the edit reads no pin: G1 and H1 were pinned by the last resync"
+    );
 }

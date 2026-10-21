@@ -218,6 +218,22 @@ const incr = median(editTimes(model, 1));
 if (model.referenceRuns() - before !== WARM_UP + RUNS) {
     throw new Error('every edit of A1 under the cycle must run the reference');
 }
+// A reference recalc leaves the cone it reached to the next recalc that needs
+// none: this is what that recalc pays, beside the A1 row's cost.
+const deferred = [];
+const deferredRuns = model.referenceRuns();
+for (let run = 0; run < 50; run++) {
+    model.setUserInput(0, 1, 1, String(run % 2 ? 1 : -1));
+    model.evaluate();
+    const start = performance.now();
+    model.setUserInput(0, ROWS, 1, String(run % 2 ? ROWS : -1));
+    model.evaluate();
+    deferred.push(performance.now() - start);
+}
+if (model.referenceRuns() - deferredRuns !== 50) {
+    throw new Error('only the edits of A1 may run the reference');
+}
+console.log(`      first edit of the last row after a reference recalc, median: ${ms(median(deferred))}`);
 model.free();
 const cycleReference = withMode(cycleBytes, false);
 ratio('reference recalc (an edit read by a cycle pin)', incr, median(editTimes(cycleReference, 1)), 1.3);

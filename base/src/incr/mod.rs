@@ -20,7 +20,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use incr_compute::{FxBuildHasher, Incr, NodeTable, Runtime};
+use incr_compute::{ErasedIncr, FxBuildHasher, Incr, NodeTable, Runtime};
 
 use crate::model::Model;
 use crate::types::FormulaValue;
@@ -76,6 +76,13 @@ pub(crate) struct IncrState {
     /// Formulas to compute and write back whether or not a change reached
     /// their node: a cell a change rewrote holds no value of the node's.
     pub(crate) pending: RefCell<Vec<Position>>,
+    /// Reached formulas the next drain computes first: the pinned, tainted
+    /// and rewritten ones a reference recalc still computes, or the batch a
+    /// drain that needs no reference starts from.
+    pub(crate) carry: RefCell<Vec<ErasedIncr>>,
+    /// Reached formulas a reference recalc left to the reference and did not
+    /// compute; see `recalc::Deferred`.
+    pub(crate) deferred: RefCell<recalc::Deferred>,
     /// Set when a formula becomes tainted that was not.
     pub(crate) newly_tainted: Cell<bool>,
     /// Whether the last reference recalc's restarts marked an anchor
@@ -91,6 +98,8 @@ pub(crate) struct IncrState {
     pub(crate) tile_reads: Cell<u64>,
     /// Recalcs that walked every cell of a sheet to find its used area.
     pub(crate) used_area_scans: Cell<u64>,
+    /// Walks of every cell for the dynamic anchors and their spill cells.
+    pub(crate) anchor_scans: Cell<u64>,
 }
 
 impl IncrState {
@@ -121,6 +130,8 @@ impl IncrState {
             value_index: Default::default(),
             frames: RefCell::default(),
             pending: RefCell::default(),
+            carry: RefCell::default(),
+            deferred: RefCell::default(),
             newly_tainted: Cell::new(false),
             fingerprint: RefCell::new(None),
             metadata_edited: Cell::new(false),
@@ -129,6 +140,7 @@ impl IncrState {
             rebuilds: Cell::new(0),
             tile_reads: Cell::new(0),
             used_area_scans: Cell::new(0),
+            anchor_scans: Cell::new(0),
             rt,
         };
         state.follow_limits(max_depth, max_stack);

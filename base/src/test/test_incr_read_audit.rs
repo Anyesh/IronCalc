@@ -100,7 +100,7 @@ const ALLOWED: &[(&str, &str, usize, &str)] = &[
     ("incr/recalc.rs", "incr_check", 3, RECALC),
     ("incr/recalc.rs", "incr_find_dynamic", 2, RECALC),
     ("incr/recalc.rs", "incr_rebuild", 3, RECALC),
-    ("incr/recalc.rs", "incr_resync", 1, RECALC),
+    ("incr/recalc.rs", "incr_stores_own_circular", 1, RECALC),
     ("incr/recalc.rs", "incr_take_changes", 1, RECALC),
     ("incr/recalc.rs", "incr_write_back", 4, RECALC),
     ("incr/recalc.rs", "used_area_after", 2, RECALC),
