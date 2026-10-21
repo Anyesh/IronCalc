@@ -65,3 +65,19 @@ fn arguments() {
     assert_eq!(model._get_text("B6"), *"0.5");
     assert_eq!(model._get_text("B7"), *"#ERROR!");
 }
+
+// B - A overflows to infinity here, so the unit-interval map must not divide by it.
+#[test]
+fn overflowing_interval() {
+    let mut model = new_empty_model();
+
+    model._set("A1", "=BETA.DIST(1E308, 2, 2, TRUE, -1E308, 1E308)");
+    model._set("A2", "=BETA.DIST(0, 2, 2, TRUE, -1E308, 1E308)");
+    model._set("A3", "=BETADIST(1E308, 2, 2, -1E308, 1E308)");
+
+    model.evaluate();
+
+    assert_eq!(model._get_text("A1"), *"1");
+    assert_eq!(model._get_text("A2"), *"0.5");
+    assert_eq!(model._get_text("A3"), *"1");
+}

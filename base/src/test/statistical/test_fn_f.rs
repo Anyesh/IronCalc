@@ -73,3 +73,19 @@ fn test_fn_f_inv_rt_sanity() {
     assert_eq!(model._get_text("A2"), *"#ERROR!");
     assert_eq!(model._get_text("A3"), *"#ERROR!");
 }
+
+// statrs panics on the NaN its cdf produces once d1 * x overflows.
+#[test]
+fn test_fn_f_dist_overflowing_x() {
+    let mut model = new_empty_model();
+
+    model._set("A1", "=F.DIST(1E307, 100, 4, TRUE)");
+    model._set("A2", "=F.DIST.RT(1E307, 100, 4)");
+    model._set("A3", "=FDIST(1E307, 100, 4)");
+
+    model.evaluate();
+
+    assert_eq!(model._get_text("A1"), *"1");
+    assert_eq!(model._get_text("A2"), *"0");
+    assert_eq!(model._get_text("A3"), *"0");
+}
