@@ -20,7 +20,9 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use incr_compute::{Cycle, ErasedIncr, FxBuildHasher, Incr, NodeTable, Runtime};
+use incr_compute::{
+    Cycle, ErasedIncr, FxBuildHasher, GridKey, GridTable, Incr, NodeTable, Runtime,
+};
 
 use crate::model::Model;
 use crate::types::FormulaValue;
@@ -48,8 +50,8 @@ pub(crate) fn frame_budget(max_depth: usize) -> u32 {
 /// model.
 pub(crate) struct IncrState {
     pub(crate) rt: Runtime,
-    pub(crate) content: NodeTable<Position, Content>,
-    pub(crate) value: NodeTable<Position, Computed>,
+    pub(crate) content: GridTable<Content>,
+    pub(crate) value: GridTable<Computed>,
     /// A version per 64×64 block, bumped when a cell of the block changes.
     pub(crate) tile: NodeTable<Position, u64>,
     pub(crate) dimension: NodeTable<u32, Dimension>,
@@ -69,10 +71,8 @@ pub(crate) struct IncrState {
     pub(crate) tainted: RefCell<HashSet<Position, FxBuildHasher>>,
     /// The value of each `dimension` node, readable without depending on it.
     pub(crate) dimensions: RefCell<index::Dimensions>,
-    pub(crate) content_index: index::CellIndex<Content>,
-    pub(crate) value_index: index::CellIndex<Computed>,
-    /// The position of every node `value_index` holds, by slot: the cycle
-    /// fallback is handed only the node.
+    /// The position of every `value` node, by slot: the cycle fallback
+    /// is handed only the node.
     pub(crate) value_positions: RefCell<HashMap<u32, Position, FxBuildHasher>>,
     /// One per running compute, innermost last.
     pub(crate) frames: RefCell<Vec<read::Frame>>,
@@ -107,6 +107,12 @@ pub(crate) struct IncrState {
     pub(crate) anchor_scans: Cell<u64>,
 }
 
+/// A cell's key in the `content` and `value` tables. Rows and columns are
+/// positive.
+pub(crate) fn grid((sheet, row, column): Position) -> GridKey {
+    GridKey::new(sheet, row as u32, column as u32)
+}
+
 impl IncrState {
     fn new(max_depth: usize, max_stack: usize) -> IncrState {
         let rt = Runtime::new();
@@ -120,8 +126,8 @@ impl IncrState {
             ctx::with_model(|model| model.incr_circular_node(node))
         });
         let state = IncrState {
-            content: rt.create_table(),
-            value: rt.create_table(),
+            content: rt.create_grid_table(),
+            value: rt.create_grid_table(),
             tile: rt.create_table(),
             dimension: rt.create_table(),
             epoch: rt.create_input(0),
@@ -131,8 +137,6 @@ impl IncrState {
             dynamic: RefCell::default(),
             tainted: RefCell::default(),
             dimensions: RefCell::default(),
-            content_index: Default::default(),
-            value_index: Default::default(),
             value_positions: RefCell::default(),
             frames: RefCell::default(),
             pending: RefCell::default(),

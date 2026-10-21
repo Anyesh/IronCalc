@@ -88,11 +88,16 @@ impl Pair {
         self.incremental.incr.as_ref().unwrap().computes.get()
     }
 
-    fn content_nodes(&self) -> usize {
+    /// The cells of the first sheet's `column`, rows 1 to `rows`, that
+    /// have a `content` node.
+    fn content_nodes(&self, column: i32, rows: i32) -> usize {
         let state = self.incremental.incr.as_ref().unwrap();
-        let mut count = 0;
-        state.content.for_each(&state.rt, |_, _| count += 1);
-        count
+        (1..=rows)
+            .filter(|&row| {
+                let key = crate::incr::grid((0, row, column));
+                state.content.get(&state.rt, key).is_some()
+            })
+            .count()
     }
 
     fn rebuilds(&self) -> u32 {
@@ -243,7 +248,8 @@ fn a_read_outside_the_used_area_needs_no_node_per_cell() {
     pair.set("A2", "3");
     pair.set("B1", "=COVARIANCE.S(A1:A5000,A1:A5000)");
     assert_eq!(pair.text("B1"), "2");
-    assert!(pair.content_nodes() < 10, "{}", pair.content_nodes());
+    let nodes = pair.content_nodes(1, 5000);
+    assert!(nodes <= 2, "{nodes}");
     pair.set("A3", "5");
     assert_eq!(pair.text("B1"), "4");
 }
