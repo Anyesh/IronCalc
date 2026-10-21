@@ -30,6 +30,17 @@ incr-compute = { path = "../../incr/.claude/worktrees/t12-base-t9/crates/incr-co
 
 [dev-dependencies]
 serde_json = "1.0"
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "incr"
+harness = false
+required-features = ["incr"]
+
+[[bench]]
+name = "incr_gate"
+harness = false
+required-features = ["incr"]
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 js-sys = { version = "0.3.69" }

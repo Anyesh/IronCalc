@@ -17,6 +17,8 @@ incr = ["ironcalc_base/incr", "ironcalc?/incr"]
 # Pins NOW() and TODAY() to a workbook's recorded time, for the lockstep
 # in tests/test_incr.mjs: its two models must read the same clock.
 mock_time = ["ironcalc_base/mock_time", "ironcalc?/mock_time"]
+# Counts the live heap for the incr benches (tests/bench_incr.mjs).
+heap-count = []
 
 [dependencies]
 # Uses `../ironcalc/base` when used locally, and uses

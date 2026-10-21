@@ -57,6 +57,9 @@ mod functions;
 mod implicit_intersection;
 #[cfg(feature = "incr")]
 mod incr;
+#[cfg(feature = "incr")]
+#[doc(hidden)]
+pub mod incr_probe;
 pub mod links;
 #[cfg(feature = "incr")]
 #[doc(hidden)]

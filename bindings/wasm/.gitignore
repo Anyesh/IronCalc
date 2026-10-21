@@ -5,3 +5,4 @@ pkg-nodejs-xlsx/
 pkg-nodejs-incr/
 pkg-nodejs-xlsx-incr/
 types.js
+pkg-nodejs-incr-bench/
