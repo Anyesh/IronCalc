@@ -344,12 +344,7 @@ impl Model<'_> {
                 (_, None) => {}
             }
         }
-        let known: Vec<(u32, Dimension)> = state
-            .dimensions
-            .borrow()
-            .iter()
-            .map(|(&sheet, &d)| (sheet, d))
-            .collect();
+        let known = state.dimensions.borrow().known();
         for (sheet, d) in known {
             let edited = touched
                 .range((sheet, i32::MIN, i32::MIN)..=(sheet, i32::MAX, i32::MAX))
@@ -558,7 +553,7 @@ impl Model<'_> {
                 "a recalc left changes in the log"
             );
         }
-        for (&sheet, &d) in state.dimensions.borrow().iter() {
+        for (sheet, d) in state.dimensions.borrow().known() {
             let used = self.workbook.worksheets[sheet as usize].dimension();
             assert_eq!(
                 d,

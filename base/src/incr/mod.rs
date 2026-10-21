@@ -8,6 +8,7 @@
 //! and leaves stale values.
 
 pub(crate) mod ctx;
+mod index;
 pub(crate) mod nodes;
 mod read;
 mod recalc;
@@ -67,7 +68,9 @@ pub(crate) struct IncrState {
     /// Formulas whose last compute read a cycle pin, or a tainted formula.
     pub(crate) tainted: RefCell<HashSet<Position>>,
     /// The value of each `dimension` node, readable without depending on it.
-    pub(crate) dimensions: RefCell<HashMap<u32, Dimension>>,
+    pub(crate) dimensions: RefCell<index::Dimensions>,
+    pub(crate) content_index: index::CellIndex<Content>,
+    pub(crate) value_index: index::CellIndex<Computed>,
     /// One per running compute, innermost last.
     pub(crate) frames: RefCell<Vec<read::Frame>>,
     /// Formulas to compute and write back whether or not a change reached
@@ -114,6 +117,8 @@ impl IncrState {
             dynamic: RefCell::default(),
             tainted: RefCell::default(),
             dimensions: RefCell::default(),
+            content_index: Default::default(),
+            value_index: Default::default(),
             frames: RefCell::default(),
             pending: RefCell::default(),
             newly_tainted: Cell::new(false),
