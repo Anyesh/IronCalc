@@ -13,7 +13,10 @@ crate-type = ["cdylib"]
 [features]
 default = []
 xlsx = ["dep:ironcalc", "dep:time"]
-incr = ["ironcalc_base/incr"]
+incr = ["ironcalc_base/incr", "ironcalc?/incr"]
+# Pins NOW() and TODAY() to a workbook's recorded time, for the lockstep
+# in tests/test_incr.mjs: its two models must read the same clock.
+mock_time = ["ironcalc_base/mock_time", "ironcalc?/mock_time"]
 
 [dependencies]
 # Uses `../ironcalc/base` when used locally, and uses

@@ -4,8 +4,10 @@
 // edits: the values must match after every recalc, and a recalc runs the
 // reference only when the plan says it must.
 
+use crate::expressions::types::Area;
 use crate::lockstep::snapshot;
 use crate::test::util::new_empty_model;
+use crate::types::SheetState;
 use crate::Model;
 
 struct Pair {
@@ -57,6 +59,16 @@ impl Pair {
 
     fn text(&self, cell: &str) -> String {
         self.incremental._get_text(cell)
+    }
+
+    /// Makes the edit in both models, evaluates them, and asserts that the
+    /// incremental one rebuilt its state for it.
+    fn rebuilds_after(&mut self, edit: impl Fn(&mut Model<'static>)) {
+        let rebuilds = self.rebuilds();
+        edit(&mut self.incremental);
+        edit(&mut self.reference);
+        self.evaluate();
+        assert_eq!(self.rebuilds(), rebuilds + 1);
     }
 }
 
@@ -254,4 +266,80 @@ fn a_recalc_with_nothing_changed_computes_nothing() {
     pair.evaluate();
     pair.evaluate();
     assert_eq!((pair.reference_runs(), pair.rebuilds()), (runs, rebuilds));
+}
+
+#[test]
+fn hiding_a_row_rebuilds() {
+    let mut pair = Pair::new();
+    pair.set("A1", "1");
+    pair.set("A2", "2");
+    pair.set("A3", "=SUBTOTAL(109,A1:A2)");
+    pair.rebuilds_after(|model| model.set_row_hidden(0, 2, true).unwrap());
+    assert_eq!(pair.text("A3"), "1");
+}
+
+#[test]
+fn inserting_rows_above_a_hidden_row_rebuilds() {
+    let mut pair = Pair::new();
+    pair.set("A1", "1");
+    pair.set("B1", "=SUBTOTAL(109,A1:A10)");
+    pair.rebuilds_after(|model| model.set_row_hidden(0, 5, true).unwrap());
+    pair.rebuilds_after(|model| model.insert_rows(0, 3, 1).unwrap());
+    pair.rebuilds_after(|model| model.delete_rows(0, 3, 1).unwrap());
+    pair.set("A5", "4");
+    assert_eq!(pair.text("B1"), "1");
+}
+
+#[test]
+fn a_merge_rebuilds() {
+    let mut pair = Pair::new();
+    pair.set("A1", "=SEQUENCE(1,3)");
+    let area = Area {
+        sheet: 0,
+        row: 2,
+        column: 2,
+        width: 2,
+        height: 1,
+    };
+    pair.rebuilds_after(|model| model.merge_cells(&area).unwrap());
+    pair.rebuilds_after(|model| model.unmerge_cells(&area).unwrap());
+}
+
+#[test]
+fn a_defined_name_edit_rebuilds() {
+    let mut pair = Pair::new();
+    pair.set("B1", "1");
+    pair.set("B2", "2");
+    pair.rebuilds_after(|model| model.new_defined_name("x", None, "Sheet1!$B$1").unwrap());
+    pair.set("A1", "=x*2");
+    pair.rebuilds_after(|model| {
+        model
+            .update_defined_name("x", None, "x", None, "Sheet1!$B$2")
+            .unwrap()
+    });
+    assert_eq!(pair.text("A1"), "4");
+}
+
+#[test]
+fn a_settings_or_sheet_state_edit_rebuilds() {
+    let mut pair = Pair::new();
+    pair.set("A1", "1");
+    pair.rebuilds_after(|model| model.set_timezone("Europe/Berlin").unwrap());
+    pair.rebuilds_after(|model| model.set_sheet_state(0, SheetState::Hidden).unwrap());
+}
+
+/// The metadata a recalc does not compare is trusted to change only through
+/// the model's own mutators; a test build checks that it did.
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "metadata changed without metadata_edited")]
+fn a_hidden_row_set_behind_the_models_back_is_caught() {
+    let mut model = new_empty_model();
+    model.set_incremental(true);
+    model._set("A1", "=SUBTOTAL(109,A2:A3)");
+    model.evaluate();
+    model.workbook.worksheets[0]
+        .set_row_hidden(2, true)
+        .unwrap();
+    model.evaluate();
 }

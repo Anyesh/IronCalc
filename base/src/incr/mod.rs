@@ -18,6 +18,7 @@ use incr_compute::{ErasedIncr, Incr, NodeTable, Runtime};
 
 use crate::model::Model;
 use crate::types::FormulaValue;
+use crate::UserModel;
 use nodes::{Computed, Content, Dimension, Position};
 
 /// The frames a compute may nest before its reads replay. Each frame holds
@@ -75,6 +76,8 @@ pub(crate) struct IncrState {
     pub(crate) marks_recur: Cell<bool>,
     /// What the state was built from; see `recalc::Fingerprint`.
     pub(crate) fingerprint: RefCell<Option<recalc::Fingerprint>>,
+    /// Set by `Model::metadata_edited`: the next recalc rebuilds.
+    pub(crate) metadata_edited: Cell<bool>,
     pub(crate) reference_runs: Cell<u32>,
     pub(crate) rebuilds: Cell<u32>,
     pub(crate) tile_reads: Cell<u64>,
@@ -108,6 +111,7 @@ impl IncrState {
             pending: RefCell::default(),
             newly_tainted: Cell::new(false),
             fingerprint: RefCell::new(None),
+            metadata_edited: Cell::new(false),
             marks_recur: Cell::new(false),
             reference_runs: Cell::new(0),
             rebuilds: Cell::new(0),
@@ -147,5 +151,12 @@ impl Model<'_> {
     /// Whether `set_incremental(true)` is in effect.
     pub fn is_incremental(&self) -> bool {
         self.incr.is_some()
+    }
+}
+
+impl UserModel<'_> {
+    /// `Model::set_incremental` on the model this one edits.
+    pub fn set_incremental(&mut self, on: bool) {
+        self.model.set_incremental(on);
     }
 }

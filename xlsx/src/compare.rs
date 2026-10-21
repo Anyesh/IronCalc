@@ -9,6 +9,8 @@ use ironcalc_base::{expressions::utils::number_to_column, Model};
 
 use crate::export::save_to_xlsx;
 use crate::import::load_from_xlsx;
+#[cfg(feature = "incr")]
+use crate::import::load_from_xlsx_bytes;
 
 use super::util::get_workbook_metadata;
 
@@ -349,15 +351,48 @@ fn max_depth() -> Option<usize> {
     std::env::var("IRONCALC_MAX_DEPTH").ok()?.parse().ok()
 }
 
-/// Loads the workbook at `file_path` as `test_file` does: in its own locale,
-/// with the clock mocked to the time it records.
+/// Loads the workbook in `bytes` as `test_file` loads a file: in its own
+/// locale, with the clock mocked to the time it records.
 #[cfg(feature = "incr")]
-fn load_for_test(file_path: &str) -> Model<'static> {
-    let model = load_from_xlsx(file_path, "en", "UTC", "en").unwrap();
+fn load_for_test(bytes: &[u8], name: &str) -> Model<'static> {
+    let load = |locale: &str| {
+        let workbook = load_from_xlsx_bytes(bytes, name, locale, "UTC").unwrap();
+        Model::from_workbook(workbook, "en").unwrap()
+    };
+    let model = load("en");
     let locale = get_workbook_metadata(&model);
     #[cfg(feature = "mock_time")]
     set_mock_time_from_metadata(&model);
-    load_from_xlsx(file_path, &locale, "UTC", "en").unwrap()
+    load(&locale)
+}
+
+/// The bytes of the workbook at `file_path`, and its name as `load_from_xlsx`
+/// gives it.
+#[cfg(feature = "incr")]
+fn read_for_test(file_path: &str) -> (Vec<u8>, String) {
+    let bytes = std::fs::read(file_path).unwrap();
+    let name = Path::new(file_path).file_stem().unwrap().to_string_lossy();
+    (bytes, name.into_owned())
+}
+
+/// One seed of the lockstep differential over the workbook in `bytes`: 40
+/// random edits at `depth`. The wasm tests drive it with the bytes they read.
+#[cfg(feature = "incr")]
+pub fn lockstep_seed(
+    bytes: &[u8],
+    name: &str,
+    seed: u64,
+    depth: Option<usize>,
+) -> Result<(), String> {
+    ironcalc_base::lockstep::run(
+        load_for_test(bytes, name),
+        load_for_test(bytes, name),
+        seed,
+        40,
+        depth,
+    )
+    .map(|_| ())
+    .map_err(|e| format!("seed {seed}, depth {depth:?}: {e}"))
 }
 
 /// The lockstep differential over the workbook at `file_path`: seeds 1 to 8
@@ -374,16 +409,10 @@ pub fn test_lockstep(file_path: &str) -> Result<(), String> {
         }
         Err(_) => 1..=8,
     };
+    let (bytes, name) = read_for_test(file_path);
     for depth in [None, Some(1)] {
         for seed in seeds.clone() {
-            ironcalc_base::lockstep::run(
-                load_for_test(file_path),
-                load_for_test(file_path),
-                seed,
-                40,
-                depth,
-            )
-            .map_err(|e| format!("seed {seed}, depth {depth:?}: {e}"))?;
+            lockstep_seed(&bytes, &name, seed, depth)?;
         }
     }
     Ok(())
@@ -394,7 +423,8 @@ pub fn test_lockstep(file_path: &str) -> Result<(), String> {
 /// sheet that no node accounts for.
 #[cfg(feature = "incr")]
 pub fn test_read_path(file_path: &str) {
-    let mut model = load_for_test(file_path);
+    let (bytes, name) = read_for_test(file_path);
+    let mut model = load_for_test(&bytes, &name);
     model.set_incremental(true);
     model.evaluate();
     ironcalc_base::lockstep::compute_every_formula(&mut model);

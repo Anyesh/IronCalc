@@ -62,6 +62,17 @@ tests:
 	wasm-pack build --dev --target nodejs --out-dir pkg-nodejs && node tests/test.mjs && node tests/test_cf.mjs
 	wasm-pack build --dev --target nodejs --out-dir pkg-nodejs-xlsx -- --features xlsx && node tests/test_xlsx.mjs
 
+# The same tests against builds with the incremental evaluator, plus its own:
+# the 64-deep nested chain in a debug and a release build, and the lockstep
+# over the workbook set (see test_incr.mjs for splitting it). The xlsx build is
+# a release one with a mocked clock: the lockstep's two models must read the
+# same NOW(), and unoptimized it takes hours.
+tests-incr:
+	wasm-pack build --dev --target nodejs --out-dir pkg-nodejs-incr -- --features incr
+	PKG_DIR=pkg-nodejs-incr node tests/test.mjs && PKG_DIR=pkg-nodejs-incr node tests/test_cf.mjs && PKG_DIR=pkg-nodejs-incr node tests/test_incr_chain.mjs
+	wasm-pack build --release --target nodejs --out-dir pkg-nodejs-xlsx-incr -- --features xlsx,incr,mock_time
+	PKG_DIR=pkg-nodejs-xlsx-incr node tests/test_xlsx.mjs && PKG_DIR=pkg-nodejs-xlsx-incr node tests/test_incr_chain.mjs && PKG_DIR=pkg-nodejs-xlsx-incr node tests/test_incr.mjs
+
 lint:
 	cargo check
 	cargo fmt -- --check
@@ -69,7 +80,7 @@ lint:
 
 clean:
 	cargo clean
-	rm -rf pkg pkg-xlsx pkg-nodejs pkg-nodejs-xlsx
+	rm -rf pkg pkg-xlsx pkg-nodejs pkg-nodejs-xlsx pkg-nodejs-incr pkg-nodejs-xlsx-incr
 	rm -f types.js
 
-.PHONY: all wasm xlsx deps lint clean tests
+.PHONY: all wasm xlsx deps lint clean tests tests-incr
