@@ -170,17 +170,16 @@ impl Model<'_> {
             )
     }
 
-    /// The fingerprint work a no-op `evaluate` does: the compare against the
-    /// stored fingerprint and the rebuild that replaces it.
+    /// The fingerprint check a no-op `evaluate` makes against the stored
+    /// fingerprint.
     pub(crate) fn incr_fingerprint_check(&self) -> bool {
         let state = self.incr_state();
-        let matches = state
-            .fingerprint
-            .borrow()
-            .as_ref()
-            .is_some_and(|built| self.fingerprint_matches(built));
-        std::hint::black_box(self.fingerprint());
-        matches
+        !state.metadata_edited.get()
+            && state
+                .fingerprint
+                .borrow()
+                .as_ref()
+                .is_some_and(|built| self.fingerprint_matches(built))
     }
 
     fn a_row_changed(&self) -> bool {

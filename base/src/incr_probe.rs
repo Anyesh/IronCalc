@@ -19,9 +19,9 @@ pub fn counts(model: &Model) -> Option<Counts> {
     })
 }
 
-/// Runs the fingerprint compare and rebuild a no-op `evaluate` makes, and
-/// returns whether the stored fingerprint still matched. Panics while the
-/// incremental evaluator is off.
+/// Runs the fingerprint check a no-op `evaluate` makes and returns whether
+/// the stored fingerprint still matched. Panics while the incremental
+/// evaluator is off.
 pub fn fingerprint_check(model: &Model) -> bool {
     model.incr_fingerprint_check()
 }
