@@ -304,18 +304,30 @@ impl Model<'_> {
     pub(crate) fn incr_value_node(&self, p: CellReferenceIndex) -> Incr<Computed> {
         let state = self.incr_state();
         state.value_index.get_or_insert(&state.rt, key(p), || {
-            state.value.get_or_insert_query_with(
+            let handle = state.value.get_or_insert_query_with(
                 &state.rt,
                 key(p),
                 move |_| ctx::with_model(|model| model.incr_compute(p)),
                 QueryOpts {
-                    cycle: CycleStrategy::fallback(move |_| {
-                        ctx::with_model(|model| model.incr_circular(p))
-                    }),
+                    cycle: CycleStrategy::TypeFallback,
                     replay: Replay::Allowed,
                 },
-            )
+            );
+            // A doomed frame's miss returns a pending handle that names no node.
+            if state.rt.is_alive(handle) {
+                state
+                    .value_positions
+                    .borrow_mut()
+                    .insert(handle.slot(), key(p));
+            }
+            handle
         })
+    }
+
+    /// The fallback of a `value` node found on a cycle.
+    pub(super) fn incr_circular_node(&mut self, node: Incr<Computed>) -> Computed {
+        let (sheet, row, column) = self.incr_state().value_positions.borrow()[&node.slot()];
+        self.incr_circular(CellReferenceIndex { sheet, row, column })
     }
 
     /// The compute of `value(p)`: the shipped engine's run of the formula,

@@ -17,10 +17,10 @@ mod recalc;
 mod miri_tests;
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use incr_compute::{ErasedIncr, FxBuildHasher, Incr, NodeTable, Runtime};
+use incr_compute::{Cycle, ErasedIncr, FxBuildHasher, Incr, NodeTable, Runtime};
 
 use crate::model::Model;
 use crate::types::FormulaValue;
@@ -71,6 +71,9 @@ pub(crate) struct IncrState {
     pub(crate) dimensions: RefCell<index::Dimensions>,
     pub(crate) content_index: index::CellIndex<Content>,
     pub(crate) value_index: index::CellIndex<Computed>,
+    /// The position of every node `value_index` holds, by slot: the cycle
+    /// fallback is handed only the node.
+    pub(crate) value_positions: RefCell<HashMap<u32, Position, FxBuildHasher>>,
     /// One per running compute, innermost last.
     pub(crate) frames: RefCell<Vec<read::Frame>>,
     /// Formulas to compute and write back whether or not a change reached
@@ -113,6 +116,9 @@ impl IncrState {
         rt.set_placeholder(Computed::new(FormulaValue::Unevaluated, Vec::new()));
         rt.set_placeholder(0_u64);
         rt.set_placeholder::<Dimension>((1, 1, 1, 1));
+        rt.set_cycle_fallback(|_: &Cycle, node: Incr<Computed>| {
+            ctx::with_model(|model| model.incr_circular_node(node))
+        });
         let state = IncrState {
             content: rt.create_table(),
             value: rt.create_table(),
@@ -127,6 +133,7 @@ impl IncrState {
             dimensions: RefCell::default(),
             content_index: Default::default(),
             value_index: Default::default(),
+            value_positions: RefCell::default(),
             frames: RefCell::default(),
             pending: RefCell::default(),
             carry: RefCell::default(),
