@@ -4,8 +4,18 @@ use super::large_df::{
     fisher_inverse_cdf_large_df, students_t_central_quantile_large_df,
     students_t_inverse_cdf_large_df,
 };
+use super::large_shape::beta_inverse_large_shape;
 
 const MAX_ITERATIONS: usize = 1000;
+
+/// Below this shape statrs' root was within 5e-13 of mpmath's across the
+/// sweep; from 100 on it was off by up to 2e-11, by up to 3e-5 at shapes of
+/// 1e6, and returned #NUM! for many larger ones.
+const LARGE_SHAPE: f64 = 50.0;
+
+/// statrs' root is kept when it is within this of the accurate one, so the
+/// results it already gets right keep their bits.
+const KEEP_RELATIVE_ERROR: f64 = 1e-12;
 
 /// Inverse of the regularized incomplete beta function I_x(a, b), or `None`
 /// when it does not converge.
@@ -246,4 +256,24 @@ pub(crate) fn fisher_inverse_cdf(df1: f64, df2: f64, p: f64) -> Option<f64> {
     }
     let z = inv_beta_reg(df1 / 2.0, df2 / 2.0, p)?;
     Some(df2 / (df1 * (1.0 / z - 1.0)))
+}
+
+/// Quantile of the beta distribution: statrs' root, checked against
+/// `beta_inverse_large_shape` once a shape reaches `LARGE_SHAPE`.
+pub(crate) fn beta_inverse_cdf(a: f64, b: f64, p: f64) -> Option<f64> {
+    let root = inv_beta_reg(a, b, p);
+    if a.max(b) < LARGE_SHAPE {
+        return root;
+    }
+    keep_statrs_root(root, beta_inverse_large_shape(a, b, p))
+}
+
+/// statrs' `root` while it is within `KEEP_RELATIVE_ERROR` of `accurate`,
+/// otherwise `accurate`, or `root` when there is no accurate one.
+pub(crate) fn keep_statrs_root(root: Option<f64>, accurate: Option<f64>) -> Option<f64> {
+    match (root, accurate) {
+        (Some(r), Some(x)) if (r - x).abs() <= KEEP_RELATIVE_ERROR * x => Some(r),
+        (_, Some(x)) => Some(x),
+        (root, None) => root,
+    }
 }

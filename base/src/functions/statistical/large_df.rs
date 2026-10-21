@@ -82,10 +82,8 @@ pub(crate) fn fisher_inverse_cdf_large_df(df1: f64, df2: f64, p: f64) -> Option<
     if large < F_MIN_LARGE_DF {
         return None;
     }
-    if small >= F_CORNISH_FISHER_PREFERRED_DF {
-        if let Some(f) = fisher_inverse_cdf_cornish_fisher(df1, df2, p) {
-            return Some(f);
-        }
+    if let Some(f) = fisher_inverse_cdf_both_large(df1, df2, p) {
+        return Some(f);
     }
     if large >= F_PERTURBATION_MIN_RATIO * small {
         return fisher_inverse_cdf_perturbed(df1, df2, p);
@@ -94,6 +92,15 @@ pub(crate) fn fisher_inverse_cdf_large_df(df1: f64, df2: f64, p: f64) -> Option<
         return fisher_inverse_cdf_cornish_fisher(df1, df2, p);
     }
     None
+}
+
+/// F quantile by the Cornish-Fisher series once both df reach
+/// `F_CORNISH_FISHER_PREFERRED_DF`, or `None` when it does not apply.
+pub(crate) fn fisher_inverse_cdf_both_large(df1: f64, df2: f64, p: f64) -> Option<f64> {
+    if df1.min(df2) < F_CORNISH_FISHER_PREFERRED_DF {
+        return None;
+    }
+    fisher_inverse_cdf_cornish_fisher(df1, df2, p)
 }
 
 /// Cumulants κ1..κ6 of ln(X / df) for X chi-square with df = 2a, which are
@@ -134,7 +141,7 @@ fn log_chi_square_cumulants(a: f64) -> [f64; 6] {
 }
 
 /// Signed standard normal quantile of `p`.
-fn normal_quantile(p: f64) -> f64 {
+pub(crate) fn normal_quantile(p: f64) -> f64 {
     if p < 0.5 {
         -normal_tail_quantile(p)
     } else {

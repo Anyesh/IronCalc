@@ -27,8 +27,6 @@ fn test_fn_inverse_beta_family_terminates() {
         // Excel's legacy FINV rejects df >= 1E10; F.INV.RT does not.
         "=FINV(0.95, 1E10, 1)",
         "=FINV(0.95, 1, 1E10)",
-        "=BETA.INV(0.5, 1E10, 1E10)",
-        "=BETAINV(0.5, 1E10, 1E10)",
     ];
     let handles: Vec<_> = cases
         .iter()
@@ -84,6 +82,34 @@ fn test_fn_inverse_large_degrees_of_freedom() {
         ("=F.INV(0.95, 30, 1E7)", 1.459_100_211_574_359_3),
         ("=F.INV(0.5, 1E7, 1E7)", 1.0),
         ("=F.INV(1E-10, 1E10, 1E10)", 0.999_872_781_274_894_2),
+    ];
+    assert_within(&cases, |expected| 1e-12 * expected.abs());
+}
+
+// statrs' root loses digits once a shape is in the hundreds, and AS 109 fails
+// outright for the largest. Expected values are mpmath roots at 45 digits.
+#[test]
+fn test_fn_inverse_beta_large_shapes() {
+    let cases = [
+        ("=BETA.INV(0.5, 1E10, 1E10)", 0.5),
+        ("=BETAINV(0.5, 1E10, 1E10)", 0.5),
+        ("=BETA.INV(0.5, 1E5, 1E5)", 0.5),
+        ("=BETA.INV(1E-300, 1E10, 1E10)", 0.499_869_018_737_162_7),
+        ("=BETA.INV(1E-10, 1E6, 1E12)", 9.936_508_182_338_218e-7),
+        ("=BETA.INV(0.3, 1E5, 1E9)", 9.982_395_458_289_537e-5),
+        ("=BETAINV(0.3, 1E5, 1E9, 0, 10)", 9.982_395_458_289_537e-4),
+        ("=BETA.INV(0.975, 1000, 1E12)", 1.062_921_150_129_058e-9),
+        (
+            "=BETA.INV(0.9999999999, 1E12, 3000)",
+            0.999_999_997_335_379_6,
+        ),
+        ("=BETA.INV(0.5, 1, 1E10)", 6.931_471_805_359_227e-11),
+        ("=BETA.INV(0.7, 1, 1000)", 1.203_248_319_851_528_3e-3),
+        ("=BETA.INV(0.025, 10, 3000)", 1.594_796_800_719_792_9e-3),
+        ("=BETA.INV(0.7, 1, 100)", 1.196_754_051_408_631_4e-2),
+        ("=BETA.INV(1E-100, 100, 2)", 9.558_474_048_072_134e-2),
+        ("=BETA.INV(1E-100, 1000, 2)", 0.790_088_790_708_146_6),
+        ("=BETA.INV(1E-100, 3E6, 2)", 0.999_921_427_963_319_3),
     ];
     assert_within(&cases, |expected| 1e-12 * expected.abs());
 }
