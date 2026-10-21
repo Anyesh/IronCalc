@@ -286,7 +286,7 @@ impl Model<'_> {
         state.computes.set(old.computes.get());
         state.used_area_scans.set(old.used_area_scans.get());
         state.anchor_scans.set(old.anchor_scans.get());
-        self.incr = Some(Rc::clone(&state));
+        self.replace_incr(Some(Rc::clone(&state)));
         *state.fingerprint.borrow_mut() = Some(self.fingerprint());
         let mut formulas = Vec::new();
         for (sheet, worksheet) in self.workbook.worksheets.iter_mut().enumerate() {

@@ -20,12 +20,14 @@ thread_local! {
 /// the pointer never outlives the borrow it was made from.
 pub(crate) struct Armed {
     previous: *mut Model<'static>,
+    #[cfg(debug_assertions)]
     previous_reads: u32,
 }
 
 impl Drop for Armed {
     fn drop(&mut self) {
         EVAL_CTX.with(|ctx| ctx.set(self.previous));
+        #[cfg(debug_assertions)]
         SHEET_READS.with(|reads| reads.set(self.previous_reads));
     }
 }
@@ -36,6 +38,7 @@ pub(crate) fn arm(model: &mut Model<'_>) -> Armed {
     let pointer = (model as *mut Model<'_>).cast::<Model<'static>>();
     Armed {
         previous: EVAL_CTX.with(|ctx| ctx.replace(pointer)),
+        #[cfg(debug_assertions)]
         previous_reads: SHEET_READS.with(|reads| reads.replace(0)),
     }
 }

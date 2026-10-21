@@ -184,6 +184,16 @@ fn eval_ctx_unarmed_panics() {
     ctx::with_model(|_| ());
 }
 
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "the incremental state was replaced inside a compute")]
+fn a_compute_cannot_replace_the_incremental_state() {
+    let mut model = new_empty_model();
+    model.set_incremental(true);
+    let _armed = ctx::arm(&mut model);
+    ctx::with_model(|model| model.set_incremental(false));
+}
+
 /// Every cell of the first sheet, as the reference left it.
 fn cells_of(model: &Model) -> Vec<(CellReferenceIndex, Cell)> {
     model.workbook.worksheets[0]

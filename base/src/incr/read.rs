@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use incr_compute::{CycleStrategy, Incr, QueryOpts, Replay, Runtime};
+use incr_compute::{CycleStrategy, FxBuildHasher, Incr, QueryOpts, Replay, Runtime};
 
 use super::nodes::{tile_of, Computed, Constant, Content, Dimension, Position};
 use super::{ctx, grid, IncrState};
@@ -37,6 +37,7 @@ pub(super) fn value_query(
 impl IncrState {
     /// Whether the value at `p` is the reference's: a dynamic anchor or
     /// spill, or a member of a cycle.
+    #[inline]
     pub(crate) fn is_pinned(&self, p: Position) -> bool {
         self.dynamic.borrow().contains(&p) || self.cycle_pins.borrow().contains(&p)
     }
@@ -67,36 +68,35 @@ pub(crate) struct Frame {
     read_taint: bool,
     /// A range reads a tile once per row; one dependency on it is enough,
     /// and a dependency list a whole column long is slow to publish.
-    tiles: HashSet<Position>,
+    tiles: HashSet<Position, FxBuildHasher>,
     /// The sheets whose `dimension` it depends on.
-    dimensions: HashSet<u32>,
+    dimensions: HashSet<u32, FxBuildHasher>,
 }
 
 /// A running compute's frame. Dropped without `close` (the compute
 /// unwound), it leaves the formula's taint as it was.
-struct ComputeFrame {
-    state: Rc<IncrState>,
+struct ComputeFrame<'a> {
+    state: &'a IncrState,
 }
 
-impl ComputeFrame {
-    fn push(state: &Rc<IncrState>) -> ComputeFrame {
+impl<'a> ComputeFrame<'a> {
+    fn push(state: &'a IncrState) -> ComputeFrame<'a> {
         state.frames.borrow_mut().push(Frame::default());
-        ComputeFrame {
-            state: Rc::clone(state),
-        }
+        ComputeFrame { state }
     }
 
     fn close(self, p: Position) {
-        let read_taint = self
-            .state
+        let state = self.state;
+        std::mem::forget(self);
+        let read_taint = state
             .frames
-            .borrow()
-            .last()
+            .borrow_mut()
+            .pop()
             .is_some_and(|frame| frame.read_taint);
-        let mut tainted = self.state.tainted.borrow_mut();
+        let mut tainted = state.tainted.borrow_mut();
         if read_taint {
             if tainted.insert(p) {
-                self.state.newly_tainted.set(true);
+                state.newly_tainted.set(true);
             }
         } else if !tainted.is_empty() {
             tainted.remove(&p);
@@ -104,7 +104,7 @@ impl ComputeFrame {
     }
 }
 
-impl Drop for ComputeFrame {
+impl Drop for ComputeFrame<'_> {
     fn drop(&mut self) {
         self.state.frames.borrow_mut().pop();
     }
@@ -120,12 +120,21 @@ impl Model<'_> {
         )
     }
 
+    /// The state, borrowed for as long as the model is not mutated. A compute
+    /// run by an `rt.get` under the borrow cannot drop it: see `replace_incr`.
+    #[allow(clippy::expect_used)]
+    #[inline]
+    fn incr_ref(&self) -> &IncrState {
+        self.incr
+            .as_deref()
+            .expect("the incremental evaluator is off")
+    }
+
     /// What the cell at `p` reads as: `evaluate_cell` while a compute of the
     /// incremental evaluator runs. A formula's reader depends on `value(p)`
     /// alone, which computes from `content(p)`.
     pub(crate) fn incr_read(&mut self, p: CellReferenceIndex) -> CalcResult {
-        let state = self.incr_state();
-        if self.holds_computed_formula(&state, p) {
+        if self.holds_computed_formula(p) {
             let computed = self.incr_value(p);
             return match computed.read_as() {
                 Some(content) => self.incr_read_content(p, content.clone()),
@@ -139,7 +148,7 @@ impl Model<'_> {
     /// Whether the sheet holds a formula at `p` whose readers take
     /// `value(p)`: not a dynamic anchor or a cycle pin, whose readers take
     /// the reference's value from `content(p)`.
-    fn holds_computed_formula(&self, state: &IncrState, p: CellReferenceIndex) -> bool {
+    fn holds_computed_formula(&self, p: CellReferenceIndex) -> bool {
         // It picks the node a read depends on, not what the read gives:
         // `value(p)` computes from `content(p)`.
         let _read = SheetRead::exempt();
@@ -152,7 +161,7 @@ impl Model<'_> {
                         ..
                     }
             )
-        ) && !state.is_pinned(key(p))
+        ) && !self.incr_ref().is_pinned(key(p))
     }
 
     fn incr_read_content(&mut self, p: CellReferenceIndex, content: Content) -> CalcResult {
@@ -259,10 +268,10 @@ impl Model<'_> {
 
     /// `content(p)`, made from the sheet the first time it is read.
     pub(crate) fn incr_content(&mut self, p: CellReferenceIndex) -> Content {
-        let state = self.incr_state();
+        let state = self.incr_ref();
         // A cell outside the used area holds nothing until the area grows
         // over it: a read of a whole column needs no node per cell.
-        let (_, (min_row, max_row, min_column, max_column)) = self.incr_dimension(&state, p.sheet);
+        let (_, (min_row, max_row, min_column, max_column)) = self.incr_dimension(state, p.sheet);
         if p.row < min_row || p.row > max_row || p.column < min_column || p.column > max_column {
             self.incr_read_dimension(p.sheet);
             return Content::Empty;
@@ -327,7 +336,7 @@ impl Model<'_> {
 
     /// `value(p)`'s node, created if there is none, without computing it.
     pub(crate) fn incr_value_node(&self, p: CellReferenceIndex) -> Incr<Computed> {
-        let state = self.incr_state();
+        let state = self.incr_ref();
         let mut created = false;
         let handle = state
             .value
@@ -449,9 +458,9 @@ impl Model<'_> {
         }
     }
 
-    pub(crate) fn incr_read_dimension(&mut self, sheet: u32) {
-        let state = self.incr_state();
-        let (handle, _) = self.incr_dimension(&state, sheet);
+    pub(crate) fn incr_read_dimension(&self, sheet: u32) {
+        let state = self.incr_ref();
+        let (handle, _) = self.incr_dimension(state, sheet);
         if let Some(top) = state.frames.borrow_mut().last_mut() {
             if !top.dimensions.insert(sheet) {
                 return;
@@ -462,11 +471,26 @@ impl Model<'_> {
 
     /// The used area of a sheet, without depending on it; creates its
     /// `dimension` node.
+    #[inline]
     fn incr_dimension(&self, state: &IncrState, sheet: u32) -> (Incr<Dimension>, Dimension) {
         let known = state.dimensions.borrow().get(sheet);
+        match known {
+            Some((d, Some(handle))) => (handle, d),
+            _ => self.incr_dimension_node(state, sheet, known.map(|(d, _)| d)),
+        }
+    }
+
+    /// `incr_dimension` for a sheet whose node is not alive, from the used
+    /// area `known` for it, if any.
+    #[inline(never)]
+    fn incr_dimension_node(
+        &self,
+        state: &IncrState,
+        sheet: u32,
+        known: Option<Dimension>,
+    ) -> (Incr<Dimension>, Dimension) {
         let d = match known {
-            Some((d, Some(handle))) => return (handle, d),
-            Some((d, None)) => d,
+            Some(d) => d,
             None => {
                 let _read = SheetRead::tracked();
                 self.workbook

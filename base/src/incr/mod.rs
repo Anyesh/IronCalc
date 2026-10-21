@@ -183,8 +183,18 @@ impl Model<'_> {
     pub fn set_incremental(&mut self, on: bool) {
         if on != self.is_incremental() {
             let limits = (self.evaluation.max_depth, self.evaluation.max_stack);
-            self.incr = on.then(|| Rc::new(IncrState::new(limits.0, limits.1)));
+            self.replace_incr(on.then(|| Rc::new(IncrState::new(limits.0, limits.1))));
         }
+    }
+
+    /// Every write of `self.incr` but the model's construction. `incr_ref`
+    /// lends the state across `rt.get`, so no compute may replace it.
+    pub(crate) fn replace_incr(&mut self, state: Option<Rc<IncrState>>) {
+        debug_assert!(
+            !ctx::is_armed(),
+            "the incremental state was replaced inside a compute"
+        );
+        self.incr = state;
     }
 
     /// Whether `set_incremental(true)` is in effect.
