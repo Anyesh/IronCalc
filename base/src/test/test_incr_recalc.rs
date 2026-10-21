@@ -303,6 +303,19 @@ fn hiding_a_row_rebuilds() {
 }
 
 #[test]
+fn hiding_a_hidden_row_again_does_not_rebuild() {
+    let mut pair = Pair::new();
+    pair.set("A1", "1");
+    pair.set("A2", "=A1+1");
+    pair.rebuilds_after(|model| model.set_row_hidden(0, 2, true).unwrap());
+    let rebuilds = pair.rebuilds();
+    pair.incremental.set_row_hidden(0, 2, true).unwrap();
+    pair.reference.set_row_hidden(0, 2, true).unwrap();
+    pair.evaluate();
+    assert_eq!(pair.rebuilds(), rebuilds);
+}
+
+#[test]
 fn inserting_rows_above_a_hidden_row_rebuilds() {
     let mut pair = Pair::new();
     pair.set("A1", "1");
