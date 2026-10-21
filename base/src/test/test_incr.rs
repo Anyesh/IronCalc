@@ -519,3 +519,13 @@ fn a_dynamic_anchor_depends_on_the_tiles_of_its_area() {
         FormulaValue::Error { .. }
     ));
 }
+
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn a_content_node_is_a_text_constant_and_a_tag() {
+    assert_eq!(
+        std::mem::size_of::<Content>(),
+        std::mem::size_of::<Constant>() + std::mem::size_of::<usize>(),
+        "every constant's content slot pays for the widest variant and a tag"
+    );
+}

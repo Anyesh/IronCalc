@@ -25,11 +25,11 @@ pub(crate) enum Content {
     Formula {
         f: i32,
         array: Option<(ArrayKind, (i32, i32))>,
-        pinned: Option<FormulaValue>,
+        pinned: Option<Box<FormulaValue>>,
     },
     Spill {
         anchor: (i32, i32),
-        pinned: Option<SpillValue>,
+        pinned: Option<Box<SpillValue>>,
     },
 }
 
@@ -90,11 +90,11 @@ impl Content {
                     ..
                 },
                 Some(Cell::ArrayFormula { v, .. }),
-            ) => *pinned = Some(v.clone()),
+            ) => *pinned = Some(Box::new(v.clone())),
             (Content::Spill { anchor, pinned }, Some(Cell::SpillCell { v, .. }))
                 if anchor_kind(*anchor) == Some(ArrayKind::Dynamic) =>
             {
-                *pinned = Some(v.clone());
+                *pinned = Some(Box::new(v.clone()));
             }
             _ => {}
         }
