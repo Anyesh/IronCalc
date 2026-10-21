@@ -19,6 +19,12 @@ use crate::model::Model;
 use crate::types::{ArrayKind, Cell, FormulaValue};
 
 impl IncrState {
+    /// Whether the value at `p` is the reference's: a dynamic anchor or
+    /// spill, or a member of a cycle.
+    pub(crate) fn is_pinned(&self, p: Position) -> bool {
+        self.dynamic.borrow().contains(&p) || self.cycle_pins.borrow().contains(&p)
+    }
+
     /// Sets the `dimension` node of a sheet, if it has one, and the value
     /// read without depending on it.
     pub(crate) fn set_dimension(&self, sheet: u32, d: Dimension) {

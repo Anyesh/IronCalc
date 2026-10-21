@@ -15,9 +15,6 @@ pub(crate) type Position = (u32, i32, i32);
 /// A pinned position also holds the value the reference wrote there, which
 /// readers take instead of computing it: dynamic anchors and their spill
 /// cells always are, because their spills depend on the order of evaluation.
-/// Node values compare numbers by their bits, here and in `Computed`: an
-/// equal value stops the readers' recompute, and `-0.0` and `0.0` are told
-/// apart by the sheet.
 #[derive(Clone, Debug)]
 pub(crate) enum Content {
     Empty,
@@ -192,6 +189,8 @@ impl PartialEq for Constant {
     }
 }
 
+/// Node values compare numbers by their bits: an equal value stops the
+/// readers' recompute, and the sheet tells `-0.0` from `0.0`.
 fn same_formula_value(a: &FormulaValue, b: &FormulaValue) -> bool {
     match (a, b) {
         (FormulaValue::Number(x), FormulaValue::Number(y)) => x.to_bits() == y.to_bits(),

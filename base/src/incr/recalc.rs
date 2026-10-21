@@ -217,9 +217,7 @@ impl Model<'_> {
         let mut sheets = BTreeSet::new();
         for p in touched {
             sheets.insert(p.0);
-            reference |= state.dynamic.borrow().contains(&p)
-                || state.cycle_pins.borrow().contains(&p)
-                || state.tainted.borrow().contains(&p);
+            reference |= state.is_pinned(p) || state.tainted.borrow().contains(&p);
             let content = self.content_on_sheet(position(p));
             if let Content::Formula {
                 array: Some((ArrayKind::Dynamic, _)),
@@ -304,8 +302,7 @@ impl Model<'_> {
                     }
                     continue;
                 }
-                let pinned =
-                    state.dynamic.borrow().contains(&p) || state.cycle_pins.borrow().contains(&p);
+                let pinned = state.is_pinned(p);
                 reference |= pinned || state.tainted.borrow().contains(&p);
                 if !pinned {
                     self.incr_write_back(position(p), computed);
@@ -358,6 +355,8 @@ impl Model<'_> {
         {
             self.incr_refresh_content(state, p);
         }
+        // At most one reference per recalc: what these find needing it, a
+        // formula tainted just now, waits for the next recalc.
         self.incr_take_changes(state);
         self.incr_drain(state, true);
     }
@@ -429,7 +428,7 @@ impl Model<'_> {
         }
         let watched: Vec<Position> = state.watched.borrow().values().copied().collect();
         for p in watched {
-            if state.dynamic.borrow().contains(&p) || state.cycle_pins.borrow().contains(&p) {
+            if state.is_pinned(p) {
                 continue;
             }
             let computed = self.incr_value(position(p));
