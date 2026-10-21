@@ -114,6 +114,33 @@ fn test_fn_inverse_beta_large_shapes() {
     assert_within(&cases, |expected| 1e-12 * expected.abs());
 }
 
+// statrs inverts the chi-square lower tail alone, from a few bisection and
+// Newton steps, and takes the right tail as the lower one at 1 - p. Expected
+// values are mpmath quantiles at 45 digits or more.
+#[test]
+fn test_fn_inverse_chi_square_tails() {
+    let cases = [
+        ("=CHISQ.INV.RT(1E-17, 10)", 103.673_873_894_768_7),
+        ("=CHIINV(1E-17, 10)", 103.673_873_894_768_7),
+        ("=CHISQ.INV(1E-17, 10)", 2.074_633_218_490_599_5e-3),
+        ("=CHISQ.INV.RT(1E-300, 1)", 1_373.872_631_222_394_1),
+        ("=CHISQ.INV.RT(0.99999999, 1)", 1.570_796_342_580_643_6e-16),
+        ("=CHISQ.INV.RT(0.95, 1)", 3.932_140_000_019_53e-3),
+        ("=CHISQ.INV(0.999999999999, 10)", 78.471_695_680_240_2),
+        ("=CHISQ.INV.RT(1E-30, 300)", 673.428_380_494_447),
+        ("=CHISQ.INV(0.99999999, 300)", 458.368_919_334_692_35),
+        ("=CHISQ.INV.RT(0.99999999, 300)", 182.185_894_942_016_23),
+        ("=CHISQ.INV.RT(1E-100, 1000)", 2_273.136_053_854_157_6),
+        ("=CHISQ.INV(1E-12, 1E7)", 9_968_573.147_172_952),
+        ("=CHISQ.INV.RT(1E-12, 1E7)", 10_031_491.498_103_05),
+        ("=CHISQ.INV(0.3, 1E8)", 99_992_583.373_519_76),
+        ("=CHISQ.INV.RT(0.3, 1E8)", 100_007_415.659_808_1),
+        ("=CHISQ.INV(1E-300, 1E10)", 9_994_761_663.681_839),
+        ("=CHISQ.INV.RT(1E-300, 1E10)", 10_005_240_164.967_949),
+    ];
+    assert_within(&cases, |expected| 1e-12 * expected.abs());
+}
+
 // p * p underflows for these, which leaves statrs' starting point NaN. Expected
 // values are mpmath roots of I_x(a, b) = p at 60 digits.
 #[test]
