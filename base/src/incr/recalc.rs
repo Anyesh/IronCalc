@@ -497,22 +497,24 @@ impl Model<'_> {
     }
 
     fn incr_write_back(&mut self, p: CellReferenceIndex, computed: Computed) {
-        let Some(cell) = self.fetch_cell(p).map(|cell| cell.into_owned()) else {
-            return;
-        };
         let Ok(worksheet) = self.workbook.worksheet_mut(p.sheet) else {
             return;
         };
+        let v = match worksheet.sheet_data.cell_mut_value(p.row, p.column) {
+            Some(mut value) => match value.set_formula_value(computed.v) {
+                Ok(()) => return,
+                Err(v) => v,
+            },
+            None => return,
+        };
+        let Some(cell) = worksheet
+            .sheet_data
+            .cell(p.row, p.column)
+            .map(|cell| cell.into_owned())
+        else {
+            return;
+        };
         let written = match cell {
-            Cell::CellFormula { f, s, .. } => worksheet.write_computed_cell(
-                p.row,
-                p.column,
-                Cell::CellFormula {
-                    f,
-                    s,
-                    v: computed.v,
-                },
-            ),
             Cell::ArrayFormula {
                 f,
                 s,
@@ -534,7 +536,7 @@ impl Model<'_> {
                     s,
                     r,
                     kind: ArrayKind::Cse,
-                    v: computed.v,
+                    v,
                 };
                 worksheet.write_computed_cell(p.row, p.column, anchor)
             }
