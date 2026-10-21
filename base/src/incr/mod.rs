@@ -71,8 +71,8 @@ pub(crate) struct IncrState {
     pub(crate) tainted: RefCell<HashSet<Position, FxBuildHasher>>,
     /// The value of each `dimension` node, readable without depending on it.
     pub(crate) dimensions: RefCell<index::Dimensions>,
-    /// The position of every `value` node, by slot: the cycle fallback
-    /// is handed only the node.
+    /// The position of every `value` node not in `watched`, by slot: the
+    /// cycle fallback is handed only the node.
     pub(crate) value_positions: RefCell<HashMap<u32, Position, FxBuildHasher>>,
     /// One per running compute, innermost last.
     pub(crate) frames: RefCell<Vec<read::Frame>>,

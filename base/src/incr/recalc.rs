@@ -26,6 +26,12 @@ use crate::model::Model;
 use crate::sheet_data::Change;
 use crate::types::{ArrayKind, Cell, FormulaValue, MergedCell, SheetState, Worksheet};
 
+/// Formulas per batch of `value` queries the rebuild creates. A batch's
+/// buffers (about 2 MB) stay under glibc's largest mmap threshold (32 MB),
+/// so each one reuses the heap the last freed instead of faulting in fresh
+/// pages.
+const QUERY_BATCH: usize = 1 << 14;
+
 /// What the state was built from besides the cells, as far as it is cheap
 /// to compare on every recalc. When it no longer matches, the state is
 /// rebuilt. Defined names, tables, hidden rows and rewrites of a formula
@@ -299,29 +305,25 @@ impl Model<'_> {
             }
         }
         // The first evaluate reads every formula's `content` and `value`
-        // nodes, so they are made here in two batches, not one by one.
+        // nodes, so they are made here in batches, not one by one.
         let rt = &state.rt;
         let contents = formulas
             .iter()
             .map(|&p| (grid(p), self.content_on_sheet(position(p))))
             .collect();
         state.content.insert_inputs(rt, contents);
-        let queries = formulas
-            .iter()
-            .map(|&p| {
-                let (compute, opts) = value_query(position(p));
-                (grid(p), compute, opts)
-            })
-            .collect();
-        let handles = state.value.insert_queries_watched(rt, queries);
-        let mut watched = state.watched.borrow_mut();
-        let mut positions = state.value_positions.borrow_mut();
-        positions.reserve(formulas.len());
-        for (p, handle) in formulas.into_iter().zip(handles) {
-            watched.insert(handle, p);
-            positions.insert(handle.slot(), p);
+        let mut handles = Vec::with_capacity(formulas.len());
+        for chunk in formulas.chunks(QUERY_BATCH) {
+            let queries = chunk
+                .iter()
+                .map(|&p| {
+                    let (compute, opts) = value_query(position(p));
+                    (grid(p), compute, opts)
+                })
+                .collect();
+            handles.extend(state.value.insert_queries_watched(rt, queries));
         }
-        drop((watched, positions));
+        state.watched.borrow_mut().insert_all(&handles, &formulas);
         self.incr_find_dynamic(&state);
         state
     }
@@ -405,6 +407,7 @@ impl Model<'_> {
                 }
                 (_, Some(handle)) => {
                     if state.watched.borrow_mut().remove(handle.into()) {
+                        state.value_positions.borrow_mut().insert(handle.slot(), p);
                         rt.unwatch(handle);
                     }
                 }

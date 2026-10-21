@@ -346,7 +346,10 @@ impl Model<'_> {
 
     /// The fallback of a `value` node found on a cycle.
     pub(super) fn incr_circular_node(&mut self, node: Incr<Computed>) -> Computed {
-        let (sheet, row, column) = self.incr_state().value_positions.borrow()[&node.slot()];
+        let state = self.incr_state();
+        let watched = state.watched.borrow().get(node.into()).map(|(_, p)| p);
+        let (sheet, row, column) =
+            watched.unwrap_or_else(|| state.value_positions.borrow()[&node.slot()]);
         self.incr_circular(CellReferenceIndex { sheet, row, column })
     }
 

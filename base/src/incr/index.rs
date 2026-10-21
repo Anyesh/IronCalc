@@ -29,6 +29,20 @@ impl Watched {
         }
     }
 
+    /// `insert` for each handle and its position, with both vectors grown
+    /// once.
+    pub(crate) fn insert_all(&mut self, handles: &[Incr<Computed>], positions: &[Position]) {
+        if let Some(slot) = handles.iter().map(|handle| handle.slot() as usize).max() {
+            if self.by_slot.len() <= slot {
+                self.by_slot.resize(slot + 1, 0);
+            }
+        }
+        self.entries.reserve(handles.len());
+        for (&handle, &p) in handles.iter().zip(positions) {
+            self.insert(handle, p);
+        }
+    }
+
     #[inline]
     pub(crate) fn get(&self, handle: ErasedIncr) -> Option<(Incr<Computed>, Position)> {
         let index = *self.by_slot.get(handle.slot() as usize)?;

@@ -524,3 +524,40 @@ fn a_cycle_the_reference_finds_among_deferred_formulas_is_pinned_now() {
         "the edit reads no pin: G1 and H1 were pinned by the last resync"
     );
 }
+
+/// A pair whose incremental model sees `cells` first at its first evaluate,
+/// so their nodes come from the rebuild's batches.
+fn loaded_pair(cells: &[(&str, &str)]) -> Pair {
+    let mut incremental = new_empty_model();
+    let mut reference = new_empty_model();
+    for &(cell, input) in cells {
+        incremental._set(cell, input);
+        reference._set(cell, input);
+    }
+    incremental.set_incremental(true);
+    let mut pair = Pair {
+        incremental,
+        reference,
+    };
+    pair.evaluate();
+    pair
+}
+
+#[test]
+fn a_cycle_present_at_load_is_circular() {
+    let mut pair = loaded_pair(&[("A1", "=B1+1"), ("B1", "=A1+1"), ("C1", "=A1*2")]);
+    assert_eq!(pair.text("A1"), "#CIRC!");
+    assert_eq!(pair.text("C1"), "#CIRC!");
+    pair.set("D1", "7");
+    assert_eq!(pair.text("B1"), "#CIRC!");
+}
+
+#[test]
+fn a_cycle_cell_made_a_constant_then_a_formula_again_is_circular() {
+    let mut pair = loaded_pair(&[("A1", "=B1+1"), ("B1", "=A1+1")]);
+    pair.set("B1", "1");
+    assert_eq!(pair.text("A1"), "2");
+    pair.set("B1", "=A1+1");
+    assert_eq!(pair.text("A1"), "#CIRC!");
+    assert_eq!(pair.text("B1"), "#CIRC!");
+}
