@@ -7,15 +7,14 @@ const MAX_ITERATIONS: usize = 1000;
 /// Inverse of the regularized incomplete beta function I_x(a, b), or `None`
 /// when it does not converge.
 ///
-/// Same arithmetic as statrs' `inv_beta_reg` (AS 109), so converging inputs
-/// give identical results. statrs loops forever once the Newton step
-/// overflows (huge shape parameters, or tails where the density underflows);
-/// that returns `None` here. Where `x * x` underflows statrs' starting point
-/// is NaN, and those inputs go to `inv_beta_reg_tiny` instead.
-pub(crate) fn inv_beta_reg(mut a: f64, mut b: f64, mut x: f64) -> Option<f64> {
-    const SAE: i32 = -30;
-    const FPU: f64 = 1e-30;
-
+/// Same arithmetic as statrs' `inv_beta_reg` (AS 109), so inputs whose root
+/// AS 109 resolves give identical results. statrs loops forever once the
+/// Newton step overflows (huge shape parameters, or tails where the density
+/// underflows); that returns `None` here. Where `x * x` underflows statrs'
+/// starting point is NaN, and where AS 109's absolute stopping test leaves the
+/// root unresolved its answer can be orders of magnitude off; both go to
+/// `inv_beta_reg_bisect` instead.
+pub(crate) fn inv_beta_reg(a: f64, b: f64, x: f64) -> Option<f64> {
     if !(a > 0.0 && b > 0.0 && a.is_finite() && b.is_finite() && (0.0..=1.0).contains(&x)) {
         return None;
     }
@@ -26,8 +25,21 @@ pub(crate) fn inv_beta_reg(mut a: f64, mut b: f64, mut x: f64) -> Option<f64> {
         return Some(1.0);
     }
     if x * x == 0.0 {
-        return inv_beta_reg_tiny(a, b, x);
+        return inv_beta_reg_bisect(a, b, x);
     }
+    let (root, resolved) = as109(a, b, x)?;
+    if resolved || brackets_root(a, b, x, root)? {
+        Some(root)
+    } else {
+        inv_beta_reg_bisect(a, b, x)
+    }
+}
+
+/// statrs' AS 109 for `0 < x < 1` with `x * x > 0`: the root, and whether its
+/// last Newton step was small enough to trust it.
+fn as109(mut a: f64, mut b: f64, mut x: f64) -> Option<(f64, bool)> {
+    const SAE: i32 = -30;
+    const FPU: f64 = 1e-30;
 
     let ln_beta = ln_beta(a, b);
     let mut p;
@@ -130,25 +142,47 @@ pub(crate) fn inv_beta_reg(mut a: f64, mut b: f64, mut x: f64) -> Option<f64> {
     if !converged {
         return None;
     }
-    Some(if flip { 1.0 - p } else { p })
+    // AS 109 accepts a step of up to sqrt(acu) in absolute terms. The error
+    // that step leaves is about step^2 / d, d being the root's distance from
+    // the nearer end of [0, 1]; trust the root only if that error is within
+    // the same tolerance relative to d.
+    let resolved = q * q <= acu.sqrt() * p.min(1.0 - p).powi(2);
+    Some((if flip { 1.0 - p } else { p }, resolved))
 }
 
-/// Inverse of I_x(a, b) for an `x` whose square underflows. AS 109's Newton
-/// test is absolute (|step| <= 1e-15), so it stops far from roots this small;
-/// bisecting over the bit patterns of [0, 1] keeps relative accuracy at any
-/// size and ends after at most 64 steps.
-fn inv_beta_reg_tiny(a: f64, b: f64, x: f64) -> Option<f64> {
+/// Inverse of I_x(a, b) by bisection over the bit patterns of [0, 1], which
+/// keeps relative accuracy at any size and ends after at most 64 steps.
+fn inv_beta_reg_bisect(a: f64, b: f64, x: f64) -> Option<f64> {
     let mut below = 0.0f64.to_bits();
     let mut above = 1.0f64.to_bits();
     while above - below > 1 {
         let mid = below + (above - below) / 2;
-        if checked_beta_reg(a, b, f64::from_bits(mid)).ok()? < x {
+        if below_root(a, b, x, f64::from_bits(mid))? {
             below = mid;
         } else {
             above = mid;
         }
     }
     Some(f64::from_bits(above))
+}
+
+/// Whether the root of I_t(a, b) = x lies within one ulp of `t`.
+fn brackets_root(a: f64, b: f64, x: f64, t: f64) -> Option<bool> {
+    if !(t > 0.0 && t < 1.0) {
+        return Some(false);
+    }
+    Some(below_root(a, b, x, t.next_down())? && !below_root(a, b, x, t.next_up())?)
+}
+
+/// Whether I_t(a, b) < x. For x above 1/2 and t at or above 1/2 it compares
+/// the upper tails instead, where 1 - x and 1 - t are exact and I_{1-t}(b, a)
+/// keeps the digits that I_t(a, b) rounds away near 1.
+fn below_root(a: f64, b: f64, x: f64, t: f64) -> Option<bool> {
+    Some(if x > 0.5 && t >= 0.5 {
+        checked_beta_reg(b, a, 1.0 - t).ok()? > 1.0 - x
+    } else {
+        checked_beta_reg(a, b, t).ok()? < x
+    })
 }
 
 /// Quantile of Student's t with `df` degrees of freedom: an asymptotic
