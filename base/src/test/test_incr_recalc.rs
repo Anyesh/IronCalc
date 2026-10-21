@@ -434,6 +434,30 @@ fn an_edit_scans_the_used_area_only_when_it_may_shrink() {
     assert_eq!(pair.text("C1"), "9");
 }
 
+// A1 is deeper than the limit, so its first run is doomed: B1 reads as a
+// placeholder error there and only that run reads Sheet2's used area.
+#[test]
+fn a_used_area_first_read_by_a_doomed_compute_follows_later_edits() {
+    for max_depth in [1, 2] {
+        let mut pair = Pair::new();
+        for model in [&mut pair.incremental, &mut pair.reference] {
+            model.set_max_evaluation_depth(max_depth);
+            model.add_sheet("Sheet2").unwrap();
+            model._set("Sheet2!A1", "1");
+            model._set("Sheet2!C3", "1");
+            model._set("A1", "=IF(ISERROR(B1),Sheet2!A1,0)");
+            for row in 1..20 {
+                model._set(&format!("B{row}"), &format!("=B{}&\"\"", row + 1));
+            }
+            model._set("B20", "x");
+        }
+        pair.evaluate();
+        pair.set("Sheet2!Z50", "5");
+        pair.set("G1", "=Sheet2!Z50");
+        assert_eq!(pair.text("G1"), "5", "max_depth = {max_depth}");
+    }
+}
+
 /// B(r) = B(r - 1) + A(r) over `rows` rows, with D1 = E1 + A1 and E1 = D1, a
 /// cycle that reads A1: once it is pinned, every edit of A1 runs the
 /// reference.

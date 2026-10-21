@@ -42,12 +42,14 @@ impl IncrState {
     }
 
     /// Sets the `dimension` node of a sheet, if it has one, and the value
-    /// read without depending on it.
+    /// read without depending on it. A sheet first read in a doomed frame
+    /// has the value but no node, and the node is later built from it.
     pub(crate) fn set_dimension(&self, sheet: u32, d: Dimension) {
-        if let Some(handle) = self.dimension.get(&self.rt, &sheet) {
+        let handle = self.dimension.get(&self.rt, &sheet);
+        if let Some(handle) = handle {
             self.rt.set(handle, d);
-            self.dimensions.borrow_mut().set(sheet, d, Some(handle));
         }
+        self.dimensions.borrow_mut().set(sheet, d, handle);
     }
 
     /// The running compute has read a cycle pin or a tainted formula.
