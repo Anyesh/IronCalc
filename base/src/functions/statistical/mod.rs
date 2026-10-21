@@ -15,6 +15,7 @@ mod geomean;
 mod hypegeom;
 mod if_ifs;
 mod inv_beta;
+mod large_df;
 mod linest;
 mod log_normal;
 mod mode_functions;

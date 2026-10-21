@@ -8,6 +8,8 @@ use crate::{
     calc_result::CalcResult, expressions::parser::Node, expressions::token::Error, model::Model,
 };
 
+const FINV_DEGREES_OF_FREEDOM_LIMIT: f64 = 1e10;
+
 // statrs' cdf evaluates d1 * x / (d1 * x + d2) and panics on the NaN it gets once
 // d1 * x overflows; dividing through by d1 * x keeps the same argument finite.
 fn f_cdf(dist: &FisherSnedecor, x: f64) -> f64 {
@@ -246,6 +248,16 @@ impl<'a> Model<'a> {
 
     // F.INV.RT(probability, deg_freedom1, deg_freedom2)
     pub(crate) fn fn_f_inv_rt(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
+        self.f_inv_rt(args, cell, f64::INFINITY)
+    }
+
+    // FINV(probability, deg_freedom1, deg_freedom2): F.INV.RT, except that Excel
+    // returns #NUM! for a df of 1E10 or more.
+    pub(crate) fn fn_finv_compat(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
+        self.f_inv_rt(args, cell, FINV_DEGREES_OF_FREEDOM_LIMIT)
+    }
+
+    fn f_inv_rt(&mut self, args: &[Node], cell: CellReferenceIndex, df_limit: f64) -> CalcResult {
         if args.len() != 3 {
             return CalcResult::new_args_number_error(cell);
         }
@@ -270,11 +282,11 @@ impl<'a> Model<'a> {
                 "probability must be in (0,1] in F.INV.RT".to_string(),
             );
         }
-        if df1 < 1.0 || df2 < 1.0 {
+        if df1 < 1.0 || df2 < 1.0 || df1 >= df_limit || df2 >= df_limit {
             return CalcResult::new_error(
                 Error::NUM,
                 cell,
-                "degrees of freedom must be >= 1 in F.INV.RT".to_string(),
+                "degrees of freedom out of range in F.INV.RT".to_string(),
             );
         }
 
