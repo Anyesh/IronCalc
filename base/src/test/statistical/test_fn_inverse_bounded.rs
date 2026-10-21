@@ -45,17 +45,7 @@ fn test_fn_inverse_beta_family_terminates() {
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
-// p * p underflows for these, which leaves statrs' starting point NaN. Expected
-// values are mpmath roots of I_x(a, b) = p at 60 digits.
-#[test]
-fn test_fn_inverse_beta_family_tiny_probability() {
-    let cases = [
-        ("=BETA.INV(1E-200, 2, 2)", 5.773_502_691_896_258e-101),
-        ("=BETAINV(1E-200, 2, 3, 0, 5)", 2.041_241_452_319_315e-100),
-        ("=BETA.INV(1E-200, 50, 2)", 9.243_775_378_285_472e-5),
-        ("=T.INV(1E-200, 5)", -1.568_392_559_099_338e40),
-        ("=F.INV(1E-200, 4, 6)", 6.123_724_356_957_945e-101),
-    ];
+fn assert_within(cases: &[(&str, f64)], tolerance: impl Fn(f64) -> f64) {
     let mut model = new_empty_model();
     for (row, (formula, _)) in cases.iter().enumerate() {
         model._set(&format!("A{}", row + 1), formula);
@@ -68,7 +58,7 @@ fn test_fn_inverse_beta_family_tiny_probability() {
             .get_cell_value_by_index(reference.sheet, reference.row, reference.column)
             .unwrap();
         match value {
-            CellValue::Number(n) if ((n - expected) / expected).abs() <= 1e-12 => {}
+            CellValue::Number(n) if (n - expected).abs() <= tolerance(*expected) => {}
             other => failures.push(format!("{formula} gave {other:?}, expected {expected:e}")),
         }
     }
@@ -95,21 +85,59 @@ fn test_fn_inverse_large_degrees_of_freedom() {
         ("=F.INV(0.5, 1E7, 1E7)", 1.0),
         ("=F.INV(1E-10, 1E10, 1E10)", 0.999_872_781_274_894_2),
     ];
-    let mut model = new_empty_model();
-    for (row, (formula, _)) in cases.iter().enumerate() {
-        model._set(&format!("A{}", row + 1), formula);
-    }
-    model.evaluate();
-    let mut failures = Vec::new();
-    for (row, (formula, expected)) in cases.iter().enumerate() {
-        let reference = model._parse_reference(&format!("A{}", row + 1));
-        let value = model
-            .get_cell_value_by_index(reference.sheet, reference.row, reference.column)
-            .unwrap();
-        match value {
-            CellValue::Number(n) if ((n - expected) / expected).abs() <= 1e-12 => {}
-            other => failures.push(format!("{formula} gave {other:?}, expected {expected:e}")),
-        }
-    }
-    assert!(failures.is_empty(), "{failures:#?}");
+    assert_within(&cases, |expected| 1e-12 * expected.abs());
+}
+
+// p * p underflows for these, which leaves statrs' starting point NaN. Expected
+// values are mpmath roots of I_x(a, b) = p at 60 digits.
+#[test]
+fn test_fn_inverse_beta_family_tiny_probability() {
+    let cases = [
+        ("=BETA.INV(1E-200, 2, 2)", 5.773_502_691_896_258e-101),
+        ("=BETAINV(1E-200, 2, 3, 0, 5)", 2.041_241_452_319_315e-100),
+        ("=BETA.INV(1E-200, 50, 2)", 9.243_775_378_285_472e-5),
+        ("=T.INV(1E-200, 5)", -1.568_392_559_099_338e40),
+        ("=F.INV(1E-200, 4, 6)", 6.123_724_356_957_945e-101),
+    ];
+    assert_within(&cases, |expected| 1e-12 * expected.abs());
+}
+
+// Roots that AS 109's absolute stopping test cannot resolve, which statrs
+// returns as about 1e-16 or 7e-16, or 3e-6 off for BETA.INV(1E-6, 0.5, 3); the
+// (50, 2) and T.INV(1E-20, 5) rows are resolved by AS 109 and must stay so.
+// Expected values are mpmath roots at 60 digits.
+#[test]
+fn test_fn_inverse_beta_family_small_probability() {
+    let cases = [
+        ("=BETA.INV(1E-20, 2, 2)", 5.773_502_692_007_369e-11),
+        ("=BETA.INV(1E-40, 2, 2)", 5.773_502_691_896_257_5e-21),
+        ("=BETA.INV(1E-100, 2, 2)", 5.773_502_691_896_258e-51),
+        ("=BETA.INV(1E-160, 2, 2)", 5.773_502_691_896_257e-81),
+        ("=BETA.INV(1E-6, 0.5, 3)", 2.844_444_444_445_523e-13),
+        ("=BETA.INV(1E-20, 0.5, 3)", 2.844_444_444_444_444_5e-41),
+        ("=BETA.INV(1E-40, 0.5, 3)", 2.844_444_444_444_444_6e-81),
+        ("=BETAINV(1E-100, 0.5, 3)", 2.844_444_444_444_444_3e-201),
+        ("=BETA.INV(1E-20, 50, 2)", 0.371_347_373_283_581_4),
+        ("=BETA.INV(1E-40, 50, 2)", 0.146_960_262_719_674_08),
+        ("=BETA.INV(1E-100, 50, 2)", 0.009_245_442_155_179_749),
+        ("=BETA.INV(1E-160, 50, 2)", 0.000_583_248_411_428_402_7),
+        ("=BETA.INV(0.6, 0.01, 2)", 2.415_392_203_314_029e-23),
+        ("=T.INV(1E-40, 5)", -156_839_255.909_933_78),
+        ("=T.INV(1E-20, 1)", -3.183_098_861_837_906_7e19),
+        ("=T.INV(1E-20, 5)", -15_683.925_454_365_775),
+        ("=F.INV(1E-40, 4, 6)", 6.123_724_356_957_945e-21),
+    ];
+    assert_within(&cases, |expected| 1e-12 * expected.abs());
+}
+
+// Roots within 1e-11 of 1, where statrs is off by a few ulps (swapped tails)
+// or by 2e-10. Expected values are mpmath roots at 60 digits; one ulp below 1
+// is EPSILON / 2.
+#[test]
+fn test_fn_inverse_beta_family_root_near_one() {
+    let cases = [
+        ("=BETA.INV(0.99999999, 1, 0.5)", 0.999_999_999_999_999_9),
+        ("=BETA.INV(0.4, 2, 0.02)", 0.999_999_999_996_997),
+    ];
+    assert_within(&cases, |_| f64::EPSILON / 2.0);
 }
