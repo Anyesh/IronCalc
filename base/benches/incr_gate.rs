@@ -3,7 +3,9 @@
 //! row misses. Timings are medians (and the chains p99) of `INCR_GATE_RUNS`
 //! incremental steps (default 200) against the median of 50 reference
 //! steps; memory is the live heap the incremental state adds, from a
-//! counting allocator.
+//! counting allocator. A ratio row times its two sides together, the
+//! reference steps spread evenly among the incremental ones, so a change in
+//! machine load lands on both sides alike.
 //!
 //! cargo bench -p ironcalc_base --features incr --bench incr_gate
 
@@ -108,50 +110,95 @@ fn with_mode(model: &Model, incremental: bool) -> Model<'static> {
     model
 }
 
-/// One edit of `row` by `editor` and the `evaluate` after it, `runs` times
-/// after a warm-up.
-fn edit_times(model: &mut Model, editor: &mut Editor, row: i32, runs: usize) -> Vec<Duration> {
-    let mut times = Vec::with_capacity(runs);
-    for run in 0..WARM_UP + runs {
+/// `warm_up` untimed steps of each side, then `runs` timed steps of `incr`
+/// with `reference_runs` timed steps of `reference` spread evenly among them.
+fn interleaved(
+    warm_up: usize,
+    runs: usize,
+    reference_runs: usize,
+    mut incr: impl FnMut() -> Duration,
+    mut reference: impl FnMut() -> Duration,
+) -> (Vec<Duration>, Vec<Duration>) {
+    for _ in 0..warm_up {
+        incr();
+    }
+    for _ in 0..warm_up {
+        reference();
+    }
+    let mut incr_times = Vec::with_capacity(runs);
+    let mut reference_times = Vec::with_capacity(reference_runs);
+    for run in 0..runs {
+        incr_times.push(incr());
+        for _ in run * reference_runs / runs..(run + 1) * reference_runs / runs {
+            reference_times.push(reference());
+        }
+    }
+    (incr_times, reference_times)
+}
+
+/// One edit of `row` by `editor` and the `evaluate` after it, timed.
+fn edit_step<'a>(
+    model: &'a mut Model<'static>,
+    editor: &'a mut Editor,
+    row: i32,
+) -> impl FnMut() -> Duration + 'a {
+    move || {
         let start = Instant::now();
         editor.edit(model, row);
         model.evaluate();
-        if run >= WARM_UP {
-            times.push(start.elapsed());
-        }
+        start.elapsed()
     }
-    times
+}
+
+/// `edit_step`, `runs` times after a warm-up.
+fn edit_times(
+    model: &mut Model<'static>,
+    editor: &mut Editor,
+    row: i32,
+    runs: usize,
+) -> Vec<Duration> {
+    let mut step = edit_step(model, editor, row);
+    for _ in 0..WARM_UP {
+        step();
+    }
+    (0..runs).map(|_| step()).collect()
 }
 
 fn edit_medians(book: &Model, row: i32) -> (Duration, Duration) {
-    let incr = median(edit_times(
-        &mut with_mode(book, true),
-        &mut Editor::new(),
-        row,
+    let mut incr_model = with_mode(book, true);
+    let mut reference_model = with_mode(book, false);
+    let (mut incr_editor, mut reference_editor) = (Editor::new(), Editor::new());
+    let (incr, reference) = interleaved(
+        WARM_UP,
         incr_runs(),
-    ));
-    let reference = median(edit_times(
-        &mut with_mode(book, false),
-        &mut Editor::new(),
-        row,
         REFERENCE_RUNS,
-    ));
-    (incr, reference)
+        edit_step(&mut incr_model, &mut incr_editor, row),
+        edit_step(&mut reference_model, &mut reference_editor, row),
+    );
+    (median(incr), median(reference))
 }
 
-/// The first `evaluate` of a model loaded from bytes.
-fn first_evaluate(book: &Model, incremental: bool, runs: usize) -> Duration {
+/// The first `evaluate` of a model loaded from `bytes`, timed without the load.
+fn first_evaluate_step(bytes: &[u8], incremental: bool) -> impl FnMut() -> Duration + '_ {
+    move || {
+        let mut model = Model::from_bytes(bytes, "en").expect("a saved model");
+        model.set_incremental(incremental);
+        let start = Instant::now();
+        model.evaluate();
+        start.elapsed()
+    }
+}
+
+fn first_evaluate_medians(book: &Model, runs: usize) -> (Duration, Duration) {
     let bytes = book.to_bytes();
-    let times = (0..runs)
-        .map(|_| {
-            let mut model = Model::from_bytes(&bytes, "en").expect("a saved model");
-            model.set_incremental(incremental);
-            let start = Instant::now();
-            model.evaluate();
-            start.elapsed()
-        })
-        .collect();
-    median(times)
+    let (incr, reference) = interleaved(
+        0,
+        runs,
+        runs,
+        first_evaluate_step(&bytes, true),
+        first_evaluate_step(&bytes, false),
+    );
+    (median(incr), median(reference))
 }
 
 fn running_sum_rows(gate: &mut Gate, label: &str, book: &Model, rows: i32, load_runs: usize) {
@@ -165,8 +212,7 @@ fn running_sum_rows(gate: &mut Gate, label: &str, book: &Model, rows: i32, load_
     );
     let (incr, reference) = edit_medians(book, rows / 2);
     gate.ratio(&format!("{label} edit the midpoint"), incr, reference, 0.8);
-    let incr = first_evaluate(book, true, load_runs);
-    let reference = first_evaluate(book, false, load_runs);
+    let (incr, reference) = first_evaluate_medians(book, load_runs);
     gate.ratio(&format!("{label} first evaluate"), incr, reference, 3.0);
 }
 
@@ -240,8 +286,7 @@ fn main() -> ExitCode {
 
     let book = running_sum(ROWS);
     running_sum_rows(&mut gate, "running sum", &book, ROWS, 20);
-    let incr = first_evaluate(&running_sum_with_anchor(ROWS), true, 20);
-    let reference = first_evaluate(&running_sum_with_anchor(ROWS), false, 20);
+    let (incr, reference) = first_evaluate_medians(&running_sum_with_anchor(ROWS), 20);
     gate.ratio(
         "running sum with an anchor, first evaluate",
         incr,
@@ -257,7 +302,18 @@ fn main() -> ExitCode {
     // The deferred edits below go on from this editor: a fresh one could
     // write the value A1 already holds, and that edit runs nothing.
     let mut a1 = Editor::new();
-    let incr = median(edit_times(&mut model, &mut a1, 1, incr_runs()));
+    let (incr, reference) = {
+        let mut reference_model = with_mode(&cycle, false);
+        let mut reference_editor = Editor::new();
+        let (incr, reference) = interleaved(
+            WARM_UP,
+            incr_runs(),
+            REFERENCE_RUNS,
+            edit_step(&mut model, &mut a1, 1),
+            edit_step(&mut reference_model, &mut reference_editor, 1),
+        );
+        (median(incr), median(reference))
+    };
     let runs = incr_probe::counts(&model)
         .expect("incremental")
         .reference_runs
@@ -267,12 +323,6 @@ fn main() -> ExitCode {
         WARM_UP + incr_runs(),
         "every edit of A1 runs the reference"
     );
-    let reference = median(edit_times(
-        &mut with_mode(&cycle, false),
-        &mut Editor::new(),
-        1,
-        REFERENCE_RUNS,
-    ));
     gate.ratio(
         "reference recalc (an edit read by a cycle pin)",
         incr,
