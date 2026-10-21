@@ -52,6 +52,7 @@ const READS: &[&str] = &[
 
 const TRACKED: &str = "a note_*_read or SheetRead::tracked accounts for it";
 const NOT_A_COMPUTE: &str = "no compute runs it: edits, the UI and the shipped engine";
+const RECALC: &str = "the recalc between computes: it reads what the change log named";
 const SHIPPED: &str = "the shipped engine's path; evaluate_cell returns before it while armed";
 const DISCARDED: &str = "SheetRead::exempt: a compute drops what it reads (styles, clears)";
 const SPILL_FALLBACK: &str =
@@ -94,7 +95,14 @@ const ALLOWED: &[(&str, &str, usize, &str)] = &[
     ("functions/subtotal.rs", "cell_is_subtotal", 1, TRACKED),
     ("incr/read.rs", "content_on_sheet", 2, TRACKED),
     ("incr/read.rs", "incr_circular", 1, TRACKED),
-    ("incr/read.rs", "incr_read_dimension", 1, TRACKED),
+    ("incr/read.rs", "incr_dimension", 1, TRACKED),
+    ("incr/recalc.rs", "a_row_changed", 1, RECALC),
+    ("incr/recalc.rs", "incr_check", 3, RECALC),
+    ("incr/recalc.rs", "incr_find_dynamic", 2, RECALC),
+    ("incr/recalc.rs", "incr_rebuild", 3, RECALC),
+    ("incr/recalc.rs", "incr_resync", 1, RECALC),
+    ("incr/recalc.rs", "incr_take_changes", 2, RECALC),
+    ("incr/recalc.rs", "incr_write_back", 2, RECALC),
     ("model.rs", "apply_result", 1, NOT_A_COMPUTE),
     ("model.rs", "can_clear_range", 1, NOT_A_COMPUTE),
     ("model.rs", "evaluate_node_in_context", 1, TRACKED),

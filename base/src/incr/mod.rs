@@ -5,14 +5,16 @@
 pub(crate) mod ctx;
 pub(crate) mod nodes;
 mod read;
+mod recalc;
 
 #[cfg(test)]
 mod miri_tests;
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use incr_compute::{Incr, NodeTable, Runtime};
+use incr_compute::{ErasedIncr, Incr, NodeTable, Runtime};
 
 use crate::model::Model;
 use crate::types::FormulaValue;
@@ -48,6 +50,34 @@ pub(crate) struct IncrState {
     pub(crate) epoch: Incr<u64>,
     /// The frame and byte budgets last given to `rt`.
     budgets: Cell<(u32, usize)>,
+    /// The formula positions with a watched `value` node, by that node.
+    pub(crate) watched: RefCell<HashMap<ErasedIncr, Position>>,
+    /// Members of cycles the incremental evaluator found, pinned to what the
+    /// reference stored: their readers take that from `content`.
+    pub(crate) cycle_pins: RefCell<HashSet<Position>>,
+    /// The dynamic anchors and their spill cells as the last rebuild or
+    /// reference recalc left them: their values are the reference's.
+    pub(crate) dynamic: RefCell<HashSet<Position>>,
+    /// Formulas whose last compute read a cycle pin, or a tainted formula.
+    pub(crate) tainted: RefCell<HashSet<Position>>,
+    /// The value of each `dimension` node, readable without depending on it.
+    pub(crate) dimensions: RefCell<HashMap<u32, Dimension>>,
+    /// One per running compute, innermost last.
+    pub(crate) frames: RefCell<Vec<read::Frame>>,
+    /// Formulas to compute and write back whether or not a change reached
+    /// their node: a cell a change rewrote holds no value of the node's.
+    pub(crate) pending: RefCell<Vec<Position>>,
+    /// Set when a formula becomes tainted that was not.
+    pub(crate) newly_tainted: Cell<bool>,
+    /// Whether the last reference recalc's restarts marked an anchor
+    /// circular: the marks last one evaluation, so the shipped engine would
+    /// restart on that anchor again.
+    pub(crate) marks_recur: Cell<bool>,
+    /// What the state was built from; see `recalc::Fingerprint`.
+    pub(crate) fingerprint: RefCell<Option<recalc::Fingerprint>>,
+    pub(crate) reference_runs: Cell<u32>,
+    pub(crate) rebuilds: Cell<u32>,
+    pub(crate) tile_reads: Cell<u64>,
 }
 
 impl IncrState {
@@ -69,6 +99,19 @@ impl IncrState {
             dimension: rt.create_table(),
             epoch: rt.create_input(0),
             budgets: Cell::new((0, 0)),
+            watched: RefCell::default(),
+            cycle_pins: RefCell::default(),
+            dynamic: RefCell::default(),
+            tainted: RefCell::default(),
+            dimensions: RefCell::default(),
+            frames: RefCell::default(),
+            pending: RefCell::default(),
+            newly_tainted: Cell::new(false),
+            fingerprint: RefCell::new(None),
+            marks_recur: Cell::new(false),
+            reference_runs: Cell::new(0),
+            rebuilds: Cell::new(0),
+            tile_reads: Cell::new(0),
             rt,
         };
         state.follow_limits(max_depth, max_stack);

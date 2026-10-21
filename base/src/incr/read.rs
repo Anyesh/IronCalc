@@ -4,11 +4,12 @@
 //! formula stores, a tile for a stretch of a row read in one go, and
 //! `dimension(s)` for the used area of a sheet.
 
+use std::collections::HashSet;
 use std::rc::Rc;
 
-use incr_compute::{CycleStrategy, QueryOpts, Replay};
+use incr_compute::{CycleStrategy, Incr, QueryOpts, Replay};
 
-use super::nodes::{tile_of, Computed, Constant, Content, Dimension};
+use super::nodes::{tile_of, Computed, Constant, Content, Dimension, Position};
 use super::{ctx, IncrState};
 use crate::calc_result::CalcResult;
 use crate::evaluation::{circular_reference, key, FormulaCell, SheetRead};
@@ -17,9 +18,83 @@ use crate::expressions::types::CellReferenceIndex;
 use crate::model::Model;
 use crate::types::{ArrayKind, Cell, FormulaValue};
 
+impl IncrState {
+    /// Whether the value at `p` is the reference's: a dynamic anchor or
+    /// spill, or a member of a cycle.
+    pub(crate) fn is_pinned(&self, p: Position) -> bool {
+        self.dynamic.borrow().contains(&p) || self.cycle_pins.borrow().contains(&p)
+    }
+
+    /// Sets the `dimension` node of a sheet, if it has one, and the value
+    /// read without depending on it.
+    pub(crate) fn set_dimension(&self, sheet: u32, d: Dimension) {
+        if let Some(handle) = self.dimension.get(&self.rt, &sheet) {
+            self.rt.set(handle, d);
+            self.dimensions.borrow_mut().insert(sheet, d);
+        }
+    }
+
+    /// The running compute has read a cycle pin or a tainted formula.
+    fn mark_tainted(&self) {
+        if let Some(top) = self.frames.borrow_mut().last_mut() {
+            top.read_taint = true;
+        }
+    }
+}
+
+/// What a running compute has read so far.
+#[derive(Default)]
+pub(crate) struct Frame {
+    /// Whether it read a cycle pin or a tainted formula.
+    read_taint: bool,
+    /// A range reads a tile once per row; one dependency on it is enough,
+    /// and a dependency list a whole column long is slow to publish.
+    tiles: HashSet<Position>,
+    /// The sheets whose `dimension` it depends on.
+    dimensions: HashSet<u32>,
+}
+
+/// A running compute's frame. Dropped without `close` (the compute
+/// unwound), it leaves the formula's taint as it was.
+struct ComputeFrame {
+    state: Rc<IncrState>,
+}
+
+impl ComputeFrame {
+    fn push(state: &Rc<IncrState>) -> ComputeFrame {
+        state.frames.borrow_mut().push(Frame::default());
+        ComputeFrame {
+            state: Rc::clone(state),
+        }
+    }
+
+    fn close(self, p: Position) {
+        let read_taint = self
+            .state
+            .frames
+            .borrow()
+            .last()
+            .is_some_and(|frame| frame.read_taint);
+        let mut tainted = self.state.tainted.borrow_mut();
+        if read_taint {
+            if tainted.insert(p) {
+                self.state.newly_tainted.set(true);
+            }
+        } else {
+            tainted.remove(&p);
+        }
+    }
+}
+
+impl Drop for ComputeFrame {
+    fn drop(&mut self) {
+        self.state.frames.borrow_mut().pop();
+    }
+}
+
 impl Model<'_> {
     #[allow(clippy::expect_used)]
-    fn incr_state(&self) -> Rc<IncrState> {
+    pub(super) fn incr_state(&self) -> Rc<IncrState> {
         Rc::clone(
             self.incr
                 .as_ref()
@@ -31,11 +106,17 @@ impl Model<'_> {
     /// incremental evaluator runs.
     pub(crate) fn incr_read(&mut self, p: CellReferenceIndex) -> CalcResult {
         match self.incr_content(p) {
-            Content::Empty => CalcResult::EmptyCell,
+            Content::Empty | Content::Blank => CalcResult::EmptyCell,
             Content::Constant(constant) => self.constant_value(constant, p),
             Content::Formula {
                 f, pinned: Some(v), ..
-            } => self.get_cell_value(&Cell::CellFormula { f, s: 0, v }, p),
+            } => {
+                let state = self.incr_state();
+                if state.cycle_pins.borrow().contains(&key(p)) {
+                    state.mark_tainted();
+                }
+                self.get_cell_value(&Cell::CellFormula { f, s: 0, v }, p)
+            }
             Content::Formula { f, .. } => {
                 let v = self.incr_value(p).v;
                 self.get_cell_value(&Cell::CellFormula { f, s: 0, v }, p)
@@ -116,6 +197,13 @@ impl Model<'_> {
     /// `content(p)`, made from the sheet the first time it is read.
     pub(crate) fn incr_content(&mut self, p: CellReferenceIndex) -> Content {
         let state = self.incr_state();
+        // A cell outside the used area holds nothing until the area grows
+        // over it: a read of a whole column needs no node per cell.
+        let (_, (min_row, max_row, min_column, max_column)) = self.incr_dimension(&state, p.sheet);
+        if p.row < min_row || p.row > max_row || p.column < min_column || p.column > max_column {
+            self.incr_read_dimension(p.sheet);
+            return Content::Empty;
+        }
         let handle = state.content.get_or_insert_input(&state.rt, key(p), || {
             let _read = SheetRead::tracked();
             self.content_on_sheet(p)
@@ -125,8 +213,22 @@ impl Model<'_> {
 
     pub(crate) fn content_on_sheet(&self, p: CellReferenceIndex) -> Content {
         let worksheet = &self.workbook.worksheets[p.sheet as usize];
+        let cycle_pinned = self
+            .incr
+            .as_ref()
+            .is_some_and(|state| state.cycle_pins.borrow().contains(&key(p)));
+        let cell = self.fetch_cell(p);
+        if cycle_pinned {
+            if let Some(Cell::CellFormula { f, v, .. }) = cell.as_deref() {
+                return Content::Formula {
+                    f: *f,
+                    array: None,
+                    pinned: Some(v.clone()),
+                };
+            }
+        }
         Content::with_pins(
-            self.fetch_cell(p).as_deref(),
+            cell.as_deref(),
             &self.workbook.shared_strings,
             |(row, column)| match worksheet.cell(row, column).as_deref() {
                 Some(Cell::ArrayFormula { kind, .. }) => Some(kind.clone()),
@@ -138,7 +240,21 @@ impl Model<'_> {
     /// `value(p)`, computed if it is not clean.
     pub(crate) fn incr_value(&mut self, p: CellReferenceIndex) -> Computed {
         let state = self.incr_state();
-        let handle = state.value.get_or_insert_query_with(
+        let handle = self.incr_value_node(p);
+        let computed = {
+            let _armed = ctx::arm(self);
+            state.rt.get(handle)
+        };
+        if state.tainted.borrow().contains(&key(p)) {
+            state.mark_tainted();
+        }
+        computed
+    }
+
+    /// `value(p)`'s node, created if there is none, without computing it.
+    pub(crate) fn incr_value_node(&self, p: CellReferenceIndex) -> Incr<Computed> {
+        let state = self.incr_state();
+        state.value.get_or_insert_query_with(
             &state.rt,
             key(p),
             move |_| ctx::with_model(|model| model.incr_compute(p)),
@@ -148,9 +264,7 @@ impl Model<'_> {
                 }),
                 replay: Replay::Allowed,
             },
-        );
-        let _armed = ctx::arm(self);
-        state.rt.get(handle)
+        )
     }
 
     /// The compute of `value(p)`: the shipped engine's run of the formula,
@@ -175,12 +289,15 @@ impl Model<'_> {
         if !self.links.is_empty() {
             self.links.remove(&key(p));
         }
+        let state = self.incr_state();
+        let frame = ComputeFrame::push(&state);
         let result = self.compute_formula(p, f);
+        frame.close(key(p));
         self.incr_computed(p, cell, &result)
     }
 
     /// The fallback of `value(p)` when it is found on a cycle.
-    fn incr_circular(&mut self, p: CellReferenceIndex) -> Computed {
+    pub(super) fn incr_circular(&mut self, p: CellReferenceIndex) -> Computed {
         // `incr_compute` read `content(p)` before `value(p)` could be found
         // on a cycle.
         let read = SheetRead::tracked();
@@ -234,17 +351,40 @@ impl Model<'_> {
         let (_, tile_row, first) = tile_of((sheet, row, first_column));
         let (_, _, last) = tile_of((sheet, row, last_column));
         for tile_column in first..=last {
-            let handle =
-                state
-                    .tile
-                    .get_or_insert_input(&state.rt, (sheet, tile_row, tile_column), || 0);
+            let tile = (sheet, tile_row, tile_column);
+            if let Some(top) = state.frames.borrow_mut().last_mut() {
+                if !top.tiles.insert(tile) {
+                    continue;
+                }
+            }
+            let handle = state.tile.get_or_insert_input(&state.rt, tile, || 0);
+            state.tile_reads.set(state.tile_reads.get() + 1);
             state.rt.get(handle);
         }
     }
 
     pub(crate) fn incr_read_dimension(&mut self, sheet: u32) {
         let state = self.incr_state();
-        let handle = state.dimension.get_or_insert_input(&state.rt, sheet, || {
+        let (handle, _) = self.incr_dimension(&state, sheet);
+        if let Some(top) = state.frames.borrow_mut().last_mut() {
+            if !top.dimensions.insert(sheet) {
+                return;
+            }
+        }
+        state.rt.get(handle);
+    }
+
+    /// The used area of a sheet, without depending on it; creates its
+    /// `dimension` node.
+    fn incr_dimension(&self, state: &IncrState, sheet: u32) -> (Incr<Dimension>, Dimension) {
+        let known = state.dimensions.borrow().get(&sheet).copied();
+        if let Some(d) = known {
+            return (
+                state.dimension.get_or_insert_input(&state.rt, sheet, || d),
+                d,
+            );
+        }
+        let d = {
             let _read = SheetRead::tracked();
             self.workbook
                 .worksheet(sheet)
@@ -253,8 +393,10 @@ impl Model<'_> {
                     (d.min_row, d.max_row, d.min_column, d.max_column)
                 })
                 .unwrap_or((1, 1, 1, 1)) as Dimension
-        });
-        state.rt.get(handle);
+        };
+        let handle = state.dimension.get_or_insert_input(&state.rt, sheet, || d);
+        state.dimensions.borrow_mut().insert(sheet, d);
+        (handle, d)
     }
 
     pub(crate) fn incr_read_epoch(&mut self) {

@@ -505,6 +505,17 @@ impl<'a> Model<'a> {
     /// is marked, so there is nothing of it to read or to contradict.
     pub fn evaluate(&mut self) {
         self.volatile.clear();
+        #[cfg(feature = "incr")]
+        if self.is_incremental() {
+            return self.incr_evaluate();
+        }
+        self.evaluate_reference();
+    }
+
+    /// The shipped engine's evaluation, which the incremental evaluator also
+    /// runs as its reference recalc: it draws what the recalc drew already.
+    /// Returns whether a restart marked an anchor circular.
+    pub(crate) fn evaluate_reference(&mut self) -> bool {
         self.sync_anchor_order();
         // Every pass starts from the same sheet: what an abandoned pass wrote
         // is undone. This is what makes a pass a function of the anchor order.
@@ -532,6 +543,7 @@ impl<'a> Model<'a> {
         }
         self.evaluation.restarts_in_last_evaluation = log.restarts;
         self.evaluate_conditional_formatting();
+        !log.circular.is_empty()
     }
 
     /// Sets how many formulas deep the evaluation may recurse. A formula that
