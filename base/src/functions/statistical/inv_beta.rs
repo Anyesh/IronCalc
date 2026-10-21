@@ -7,8 +7,9 @@ const MAX_ITERATIONS: usize = 1000;
 ///
 /// Same arithmetic as statrs' `inv_beta_reg` (AS 109), so converging inputs
 /// give identical results. statrs loops forever once the Newton step
-/// overflows (huge shape parameters, or tails where the density underflows)
-/// and panics on a NaN starting point; both return `None` here.
+/// overflows (huge shape parameters, or tails where the density underflows);
+/// that returns `None` here. Where `x * x` underflows statrs' starting point
+/// is NaN, and those inputs go to `inv_beta_reg_tiny` instead.
 pub(crate) fn inv_beta_reg(mut a: f64, mut b: f64, mut x: f64) -> Option<f64> {
     const SAE: i32 = -30;
     const FPU: f64 = 1e-30;
@@ -21,6 +22,9 @@ pub(crate) fn inv_beta_reg(mut a: f64, mut b: f64, mut x: f64) -> Option<f64> {
     }
     if x == 1.0 {
         return Some(1.0);
+    }
+    if x * x == 0.0 {
+        return inv_beta_reg_tiny(a, b, x);
     }
 
     let ln_beta = ln_beta(a, b);
@@ -125,6 +129,24 @@ pub(crate) fn inv_beta_reg(mut a: f64, mut b: f64, mut x: f64) -> Option<f64> {
         return None;
     }
     Some(if flip { 1.0 - p } else { p })
+}
+
+/// Inverse of I_x(a, b) for an `x` whose square underflows. AS 109's Newton
+/// test is absolute (|step| <= 1e-15), so it stops far from roots this small;
+/// bisecting over the bit patterns of [0, 1] keeps relative accuracy at any
+/// size and ends after at most 64 steps.
+fn inv_beta_reg_tiny(a: f64, b: f64, x: f64) -> Option<f64> {
+    let mut below = 0.0f64.to_bits();
+    let mut above = 1.0f64.to_bits();
+    while above - below > 1 {
+        let mid = below + (above - below) / 2;
+        if checked_beta_reg(a, b, f64::from_bits(mid)).ok()? < x {
+            below = mid;
+        } else {
+            above = mid;
+        }
+    }
+    Some(f64::from_bits(above))
 }
 
 /// Quantile of Student's t with `df` degrees of freedom, as statrs computes it.
