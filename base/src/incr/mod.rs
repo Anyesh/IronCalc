@@ -1,6 +1,11 @@
 //! The incremental evaluator behind `Model::set_incremental`. Off, the model
 //! is the shipped engine, which stays the reference the incremental results
 //! are checked against.
+//!
+//! It learns of edits through `Model`'s methods. A write through the public
+//! `Model::workbook` (`Worksheet::set_row_hidden`, `workbook.tables`, ...)
+//! bypasses it, as it bypasses the shipped engine's parsed-structure caches,
+//! and leaves stale values.
 
 pub(crate) mod ctx;
 pub(crate) mod nodes;
@@ -143,7 +148,10 @@ impl IncrState {
 
 impl Model<'_> {
     /// Switches the incremental evaluator on or off. Switching it on when it
-    /// is on keeps the state it has.
+    /// is on keeps the state it has. Edit the workbook through `Model`'s
+    /// methods while it is on: a write through `self.workbook`, such as
+    /// `Worksheet::set_row_hidden`, is not seen, so a `SUBTOTAL(109, ...)`
+    /// over that row keeps its old value.
     pub fn set_incremental(&mut self, on: bool) {
         if on != self.is_incremental() {
             let limits = (self.evaluation.max_depth, self.evaluation.max_stack);

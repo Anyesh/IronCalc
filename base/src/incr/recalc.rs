@@ -27,9 +27,12 @@ use crate::types::{ArrayKind, Cell, MergedCell, SheetState, Worksheet};
 
 /// What the state was built from besides the cells, as far as it is cheap
 /// to compare on every recalc. When it no longer matches, the state is
-/// rebuilt. The rest (defined names, tables, hidden rows and the formula
-/// lists) changes only through mutators that call `Model::metadata_edited`,
-/// which a test build checks against `Untracked`.
+/// rebuilt. Defined names, tables, hidden rows and rewrites of a formula
+/// list change only through mutators that call `Model::metadata_edited`.
+/// Appending to a formula list is not flagged: the indices cells hold stay
+/// valid, and each cell that takes a new formula logs its change. A test
+/// build checks both against `Untracked`, whose formula check compares only
+/// each list's old prefix.
 pub(crate) struct Fingerprint {
     workbook_name: String,
     tz: String,

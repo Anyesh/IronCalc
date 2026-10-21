@@ -580,8 +580,9 @@ impl<'a> Model<'a> {
     }
 
     /// Called by every mutator of the metadata the incremental evaluator
-    /// does not compare on each recalc: defined names, tables, hidden rows
-    /// and the formula lists. The next recalc rebuilds its state.
+    /// does not compare on each recalc: defined names, tables, hidden rows,
+    /// and a formula list rewritten in place (an append needs no call, see
+    /// `incr::recalc::Fingerprint`). The next recalc rebuilds its state.
     pub(crate) fn metadata_edited(&self) {
         #[cfg(feature = "incr")]
         if let Some(state) = &self.incr {
