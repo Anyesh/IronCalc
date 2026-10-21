@@ -376,7 +376,7 @@ impl Model<'_> {
         }
         let mut reference = false;
         for &p in &touched {
-            reference |= state.is_pinned(p) || state.tainted.borrow().contains(&p);
+            reference |= state.is_pinned(p) || state.is_tainted(p);
             let content = self.content_on_sheet(position(p));
             if let Content::Formula {
                 array: Some((ArrayKind::Dynamic, _)),
@@ -495,9 +495,9 @@ impl Model<'_> {
         let held = |handle: &ErasedIncr| {
             watched
                 .get(*handle)
-                .is_some_and(|(_, p)| state.is_pinned(p) || state.tainted.borrow().contains(&p))
+                .is_some_and(|(_, p)| state.is_pinned(p) || state.is_tainted(p))
         };
-        if !reference && !reached.iter().any(held) {
+        if !reference && (state.holds_none() || !reached.iter().any(held)) {
             let mut carry = state.deferred.borrow_mut().take();
             carry.extend(reached);
             *state.carry.borrow_mut() = carry;
@@ -554,7 +554,7 @@ impl Model<'_> {
                     continue;
                 }
                 let pinned = state.is_pinned(p);
-                reference |= pinned || state.tainted.borrow().contains(&p);
+                reference |= pinned || state.is_tainted(p);
                 if !pinned {
                     self.incr_write_back(position(p), computed);
                 }

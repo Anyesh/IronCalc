@@ -39,7 +39,21 @@ impl IncrState {
     /// spill, or a member of a cycle.
     #[inline]
     pub(crate) fn is_pinned(&self, p: Position) -> bool {
-        self.dynamic.borrow().contains(&p) || self.cycle_pins.borrow().contains(&p)
+        let dynamic = self.dynamic.borrow();
+        let pins = self.cycle_pins.borrow();
+        !dynamic.is_empty() && dynamic.contains(&p) || !pins.is_empty() && pins.contains(&p)
+    }
+
+    pub(crate) fn is_tainted(&self, p: Position) -> bool {
+        let tainted = self.tainted.borrow();
+        !tainted.is_empty() && tainted.contains(&p)
+    }
+
+    /// Whether no formula is pinned or tainted, so none needs the reference.
+    pub(crate) fn holds_none(&self) -> bool {
+        self.dynamic.borrow().is_empty()
+            && self.cycle_pins.borrow().is_empty()
+            && self.tainted.borrow().is_empty()
     }
 
     /// Sets the `dimension` node of a sheet, if it has one, and the value
@@ -328,7 +342,7 @@ impl Model<'_> {
             let _armed = ctx::arm(self);
             state.rt.get(handle)
         };
-        if state.tainted.borrow().contains(&key(p)) {
+        if state.is_tainted(key(p)) {
             state.mark_tainted();
         }
         computed
