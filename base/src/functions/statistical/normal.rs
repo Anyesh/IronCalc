@@ -1,5 +1,6 @@
-use statrs::distribution::{Continuous, ContinuousCDF, Normal, StudentsT};
+use statrs::distribution::{Continuous, ContinuousCDF, Normal};
 
+use super::inv_beta::students_t_inverse_cdf;
 use crate::expressions::types::CellReferenceIndex;
 use crate::{
     calc_result::CalcResult, expressions::parser::Node, expressions::token::Error, model::Model,
@@ -298,26 +299,17 @@ impl<'a> Model<'a> {
 
         let df = size - 1.0;
 
-        let t_dist = match StudentsT::new(0.0, 1.0, df) {
-            Ok(d) => d,
-            Err(_) => {
-                return CalcResult::new_error(
-                    Error::ERROR,
-                    cell,
-                    "Failed to construct Student's t distribution".to_string(),
-                )
+        // Two-sided CI => use 1 - alpha/2
+        let t_crit = match students_t_inverse_cdf(df, 1.0 - alpha / 2.0) {
+            Some(t) if t.is_finite() => t,
+            _ => {
+                return CalcResult::Error {
+                    error: Error::NUM,
+                    origin: cell,
+                    message: "Invalid quantile for CONFIDENCE.T".to_string(),
+                }
             }
         };
-
-        // Two-sided CI => use 1 - alpha/2
-        let t_crit = t_dist.inverse_cdf(1.0 - alpha / 2.0);
-        if !t_crit.is_finite() {
-            return CalcResult::Error {
-                error: Error::NUM,
-                origin: cell,
-                message: "Invalid quantile for CONFIDENCE.T".to_string(),
-            };
-        }
 
         let margin = t_crit * std_dev / size.sqrt();
         CalcResult::Number(margin)

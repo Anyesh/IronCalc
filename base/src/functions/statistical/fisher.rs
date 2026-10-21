@@ -1,5 +1,6 @@
 use statrs::distribution::{Continuous, ContinuousCDF, FisherSnedecor};
 
+use super::inv_beta::fisher_inverse_cdf;
 use crate::expressions::types::CellReferenceIndex;
 use crate::functions::statistical::t_dist::sample_var;
 use crate::{
@@ -221,23 +222,10 @@ impl<'a> Model<'a> {
             );
         }
 
-        let dist = match FisherSnedecor::new(df1, df2) {
-            Ok(d) => d,
-            Err(_) => {
-                return CalcResult::new_error(
-                    Error::NUM,
-                    cell,
-                    "Invalid parameters for F distribution".to_string(),
-                )
-            }
-        };
-
-        let x = dist.inverse_cdf(p);
-        if x.is_nan() || x.is_infinite() || x < 0.0 {
-            return CalcResult::new_error(Error::NUM, cell, "Invalid result for F.INV".to_string());
+        match fisher_inverse_cdf(df1, df2, p) {
+            Some(x) if x.is_finite() && x >= 0.0 => CalcResult::Number(x),
+            _ => CalcResult::new_error(Error::NUM, cell, "Invalid result for F.INV".to_string()),
         }
-
-        CalcResult::Number(x)
     }
 
     // F.INV.RT(probability, deg_freedom1, deg_freedom2)
@@ -274,28 +262,11 @@ impl<'a> Model<'a> {
             );
         }
 
-        let dist = match FisherSnedecor::new(df1, df2) {
-            Ok(d) => d,
-            Err(_) => {
-                return CalcResult::new_error(
-                    Error::NUM,
-                    cell,
-                    "Invalid parameters for F distribution".to_string(),
-                )
-            }
-        };
-
         // p is right-tail: p = P(F > x) = 1 - CDF(x)
-        let x = dist.inverse_cdf(1.0 - p);
-        if x.is_nan() || x.is_infinite() || x < 0.0 {
-            return CalcResult::new_error(
-                Error::NUM,
-                cell,
-                "Invalid result for F.INV.RT".to_string(),
-            );
+        match fisher_inverse_cdf(df1, df2, 1.0 - p) {
+            Some(x) if x.is_finite() && x >= 0.0 => CalcResult::Number(x),
+            _ => CalcResult::new_error(Error::NUM, cell, "Invalid result for F.INV.RT".to_string()),
         }
-
-        CalcResult::Number(x)
     }
 
     // F.TEST(array1, array2)
