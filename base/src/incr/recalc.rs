@@ -11,10 +11,12 @@
 
 #[cfg(debug_assertions)]
 use std::collections::hash_map::DefaultHasher;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 #[cfg(debug_assertions)]
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
+
+use incr_compute::ErasedIncr;
 
 use super::nodes::{tile_of, Computed, Content, Dimension, Position};
 use super::IncrState;
@@ -83,6 +85,48 @@ fn hash_of(value: impl Hash) -> u64 {
     let mut hasher = DefaultHasher::new();
     value.hash(&mut hasher);
     hasher.finish()
+}
+
+/// Watched formulas that a reference recalc reached and left uncomputed,
+/// because the reference stores their exact values. The next recalc that
+/// needs no reference computes them first; until then no change reaches
+/// them again, though a read may compute one on demand. One the reference
+/// pins, or that reads a pin, is released to compute after it instead.
+#[derive(Default)]
+pub(crate) struct Deferred {
+    order: Vec<ErasedIncr>,
+    held: HashSet<ErasedIncr>,
+}
+
+impl Deferred {
+    fn push(&mut self, handle: ErasedIncr) {
+        if self.held.insert(handle) {
+            self.order.push(handle);
+        }
+    }
+
+    /// Whether `handle` was held; `take` then skips it.
+    fn release(&mut self, handle: ErasedIncr) -> bool {
+        self.held.remove(&handle)
+    }
+
+    fn take(&mut self) -> Vec<ErasedIncr> {
+        let mut held = std::mem::take(&mut self.held);
+        std::mem::take(&mut self.order)
+            .into_iter()
+            .filter(|handle| held.remove(handle))
+            .collect()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.held.len()
+    }
+
+    #[cfg(debug_assertions)]
+    fn contains(&self, handle: ErasedIncr) -> bool {
+        self.held.contains(&handle)
+    }
 }
 
 fn position(p: Position) -> CellReferenceIndex {
@@ -217,7 +261,7 @@ impl Model<'_> {
         };
         state.rt.set(state.epoch, state.rt.get(state.epoch) + 1);
         reference |= state.marks_recur.get();
-        reference |= self.incr_drain(&state, false);
+        reference = self.incr_defer(&state, reference) || self.incr_drain(&state, false);
         if reference {
             state.reference_runs.set(state.reference_runs.get() + 1);
             state.marks_recur.set(self.evaluate_reference());
@@ -401,6 +445,61 @@ impl Model<'_> {
         area
     }
 
+    /// The watched formulas changes reached since the last drain, the ones
+    /// rewritten among them, and what `carry` holds.
+    fn incr_reached(&self, state: &IncrState) -> Vec<ErasedIncr> {
+        let mut reached = state.carry.take();
+        reached.extend(state.rt.drain_dirtied_watched());
+        let pending: Vec<Position> = state.pending.borrow_mut().drain(..).collect();
+        for p in pending {
+            if let Some(handle) = state.value.get(&state.rt, &p) {
+                reached.push(handle.into());
+            }
+        }
+        reached
+    }
+
+    /// Before any compute of a recalc: if `reference` says it needs the
+    /// reference already, or a formula the changes reached is pinned or
+    /// tainted (which needs it), only those formulas and the rewritten ones
+    /// are kept to compute after the reference, and the rest are deferred.
+    /// Returns true if it deferred them. Otherwise the reached formulas, with
+    /// the ones deferred before, are what `incr_drain` starts from, and it
+    /// may still find the reference needed.
+    fn incr_defer(&self, state: &IncrState, reference: bool) -> bool {
+        let rewritten: HashSet<ErasedIncr> = state
+            .pending
+            .borrow()
+            .iter()
+            .filter_map(|p| state.value.get(&state.rt, p))
+            .map(ErasedIncr::from)
+            .collect();
+        let reached = self.incr_reached(state);
+        let watched = state.watched.borrow();
+        let held = |handle: &ErasedIncr| {
+            watched
+                .get(handle)
+                .is_some_and(|&p| state.is_pinned(p) || state.tainted.borrow().contains(&p))
+        };
+        if !reference && !reached.iter().any(held) {
+            let mut carry = state.deferred.borrow_mut().take();
+            carry.extend(reached);
+            *state.carry.borrow_mut() = carry;
+            return false;
+        }
+        let mut carry = Vec::new();
+        let mut deferred = state.deferred.borrow_mut();
+        for handle in reached {
+            if held(&handle) || rewritten.contains(&handle) {
+                carry.push(handle);
+            } else {
+                deferred.push(handle);
+            }
+        }
+        *state.carry.borrow_mut() = carry;
+        true
+    }
+
     /// Computes the watched formulas that changes reached and writes their
     /// values back, until no change is left. True if one of them needs the
     /// reference. After the reference ran, the members of a cycle found are
@@ -408,13 +507,7 @@ impl Model<'_> {
     fn incr_drain(&mut self, state: &IncrState, after_reference: bool) -> bool {
         let mut reference = false;
         loop {
-            let mut drained = state.rt.drain_dirtied_watched();
-            let pending: Vec<Position> = state.pending.borrow_mut().drain(..).collect();
-            for p in pending {
-                if let Some(handle) = state.value.get(&state.rt, &p) {
-                    drained.push(handle.into());
-                }
-            }
+            let drained = self.incr_reached(state);
             if drained.is_empty() {
                 break;
             }
@@ -513,7 +606,30 @@ impl Model<'_> {
         // At most one reference per recalc: what these find needing it, a
         // formula tainted just now, waits for the next recalc.
         self.incr_take_changes(state);
+        self.incr_release_held(state);
         self.incr_drain(state, true);
+    }
+
+    /// Moves the deferred formulas now pinned or tainted to compute after
+    /// this reference, which they would otherwise make the next recalc run.
+    fn incr_release_held(&self, state: &IncrState) {
+        let held: Vec<Position> = state
+            .cycle_pins
+            .borrow()
+            .iter()
+            .chain(state.tainted.borrow().iter())
+            .copied()
+            .collect();
+        let mut deferred = state.deferred.borrow_mut();
+        let mut carry = state.carry.borrow_mut();
+        for p in held {
+            if let Some(handle) = state.value.get(&state.rt, &p) {
+                let handle = ErasedIncr::from(handle);
+                if deferred.release(handle) {
+                    carry.push(handle);
+                }
+            }
+        }
     }
 
     /// Whether the watched formula at `p` stores its own circular reference.
@@ -597,9 +713,17 @@ impl Model<'_> {
                 "the used area of sheet {sheet} changed with no change logged"
             );
         }
-        let watched: Vec<Position> = state.watched.borrow().values().copied().collect();
-        for p in watched {
-            if state.is_pinned(p) {
+        let watched: Vec<(ErasedIncr, Position)> = state
+            .watched
+            .borrow()
+            .iter()
+            .map(|(&handle, &p)| (handle, p))
+            .collect();
+        for (handle, p) in watched {
+            // A deferred formula holds the reference's value and is computed
+            // by the next recalc that needs no reference; computing it here
+            // would make a debug build skip that path.
+            if state.is_pinned(p) || state.deferred.borrow().contains(handle) {
                 continue;
             }
             let computed = self.incr_value(position(p));

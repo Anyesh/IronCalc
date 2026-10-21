@@ -73,6 +73,13 @@ pub(crate) struct IncrState {
     /// Formulas to compute and write back whether or not a change reached
     /// their node: a cell a change rewrote holds no value of the node's.
     pub(crate) pending: RefCell<Vec<Position>>,
+    /// Reached formulas the next drain computes first: the pinned, tainted
+    /// and rewritten ones a reference recalc still computes, or the batch a
+    /// drain that needs no reference starts from.
+    pub(crate) carry: RefCell<Vec<ErasedIncr>>,
+    /// Reached formulas a reference recalc left to the reference and did not
+    /// compute; see `recalc::Deferred`.
+    pub(crate) deferred: RefCell<recalc::Deferred>,
     /// Set when a formula becomes tainted that was not.
     pub(crate) newly_tainted: Cell<bool>,
     /// Whether the last reference recalc's restarts marked an anchor
@@ -118,6 +125,8 @@ impl IncrState {
             dimensions: RefCell::default(),
             frames: RefCell::default(),
             pending: RefCell::default(),
+            carry: RefCell::default(),
+            deferred: RefCell::default(),
             newly_tainted: Cell::new(false),
             fingerprint: RefCell::new(None),
             metadata_edited: Cell::new(false),
