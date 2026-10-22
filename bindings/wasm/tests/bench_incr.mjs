@@ -3,7 +3,8 @@
 // misses. Edit timings are medians (and the chains p99) of INCR_GATE_RUNS
 // steps (default 200) against the median of as many reference steps; a first
 // evaluate is the median of 20 loads. A ratio times each incremental step right
-// before a reference one, so a change in machine load reaches both sides alike.
+// before a reference one, so a change in machine load reaches both sides alike;
+// an absolute row times the incremental model alone.
 // Memory is the live heap the incremental state adds, from the heap-count
 // build. `make bench-incr` builds and runs it.
 //
@@ -72,7 +73,12 @@ const withCycle = (set) => {
     set(1, 5, '=D1');
 };
 
+let referenceModels = 0;
+
 function load(bytes, incremental) {
+    if (!incremental) {
+        referenceModels += 1;
+    }
     const model = Model.fromBytes(bytes, 'en');
     model.pauseEvaluation();
     model.setIncremental(incremental);
@@ -108,6 +114,18 @@ function timedEdit(model, row, edit) {
     edit(model, row);
     model.evaluate();
     return performance.now() - start;
+}
+
+// Runs `measure`, the samples of an absolute row, and throws if it made a
+// reference model: a reference recalc between the samples would evict the
+// caches they run on.
+function incrementalAlone(row, measure) {
+    const before = referenceModels;
+    const measured = measure();
+    if (referenceModels !== before) {
+        throw new Error(`${row} times an incremental model alone`);
+    }
+    return measured;
 }
 
 function editTimes(model, row) {
@@ -196,8 +214,14 @@ function atMost(row, measured, bound) {
 function runningSumRows(label, bytes, rows) {
     let [incr, reference] = editMedians(bytes, 1);
     ratio(`${label} edit A1`, incr, reference, 1.5);
-    [incr] = editMedians(bytes, rows);
-    atMost(`${label} edit the last row`, incr, 0.3);
+    const lastRow = `${label} edit the last row`;
+    const last = incrementalAlone(lastRow, () => {
+        const model = withMode(bytes, true);
+        const times = editTimes(model, rows);
+        model.free();
+        return median(times);
+    });
+    atMost(lastRow, last, 0.3);
     [incr, reference] = editMedians(bytes, rows / 2);
     ratio(`${label} edit the midpoint`, incr, reference, 0.8);
     [incr, reference] = firstEvaluateMedians(bytes);
@@ -224,21 +248,24 @@ function bytesOf(model) {
 const chainBytes = bytesOf(chains(ROWS));
 const head = (ROWS / CHAIN / 2) * CHAIN + 1;
 let model = withMode(chainBytes, true);
-const times = editTimes(model, head);
+const times = incrementalAlone('chains edit one head', () => editTimes(model, head));
 atMost('chains edit one head, median', median(times), 0.75);
 console.log(`      chains edit one head, p99: ${ms(quantile(times, 0.99))}`);
-const noOp = [];
-const checks = [];
-for (let run = 0; run < RUNS; run++) {
-    let start = performance.now();
-    model.evaluate();
-    noOp.push(performance.now() - start);
-    start = performance.now();
-    if (!model.fingerprintCheck()) {
-        throw new Error('the fingerprint changed with no edit');
+const [noOp, checks] = incrementalAlone('chains no-op evaluate', () => {
+    const noOp = [];
+    const checks = [];
+    for (let run = 0; run < RUNS; run++) {
+        let start = performance.now();
+        model.evaluate();
+        noOp.push(performance.now() - start);
+        start = performance.now();
+        if (!model.fingerprintCheck()) {
+            throw new Error('the fingerprint changed with no edit');
+        }
+        checks.push(performance.now() - start);
     }
-    checks.push(performance.now() - start);
-}
+    return [noOp, checks];
+});
 atMost('chains no-op evaluate without the fingerprint check', Math.max(0, median(noOp) - median(checks)), 0.06);
 atMost('chains fingerprint check, one sheet', median(checks), 0.015);
 model.free();
