@@ -351,7 +351,7 @@ impl Model<'_> {
                 created = true;
                 value_query(p)
             });
-        if created {
+        if created && state.rt.is_alive(handle) {
             state
                 .value_positions
                 .borrow_mut()
