@@ -6,7 +6,12 @@
 //! counting allocator. A ratio row times its two sides together, the
 //! reference steps spread evenly among the incremental ones, so a change in
 //! machine load lands on both sides alike; an absolute row times the
-//! incremental model alone.
+//! incremental model alone. The chains edit also has a user-instruction
+//! count per step, from a perf counter, which machine load does not move;
+//! where the counter can't be opened (not Linux, or `perf_event_paranoid`
+//! above 2) the row is skipped. Its bound is relative to a recorded count,
+//! so a change that moves the count on purpose records the new one.
+//! `INCR_GATE_CHAINS_ONLY` set stops after the chains edit rows.
 //!
 //! cargo bench -p ironcalc_base --features incr --bench incr_gate
 
@@ -54,12 +59,25 @@ static ALLOCATOR: Counting = Counting;
 const REFERENCE_RUNS: usize = 50;
 const WARM_UP: usize = 10;
 const SCALE_ROWS: i32 = 400_000;
+/// User instructions per chains edit, recorded with incr at
+/// t12-base-0c85491.
+const CHAINS_EDIT_INSTRUCTIONS: f64 = 344_832.0;
+const CHAINS_EDIT_INSTRUCTIONS_SLACK: f64 = 1.05;
 
 struct Gate {
     failed: usize,
 }
 
 impl Gate {
+    fn exit_code(&self) -> ExitCode {
+        if self.failed == 0 {
+            ExitCode::SUCCESS
+        } else {
+            println!("{} rows missed the gate", self.failed);
+            ExitCode::FAILURE
+        }
+    }
+
     fn check(&mut self, row: &str, measured: String, bound: String, ok: bool) {
         if !ok {
             self.failed += 1;
@@ -187,6 +205,25 @@ fn edit_times(
     (0..runs).map(|_| step()).collect()
 }
 
+/// User instructions per `edit_step` over `runs` steps after a warm-up.
+fn edit_instructions(
+    model: &mut Model<'static>,
+    editor: &mut Editor,
+    row: i32,
+    runs: usize,
+) -> Result<f64, String> {
+    let counter = instructions::Counter::open()?;
+    let mut step = edit_step(model, editor, row);
+    for _ in 0..WARM_UP {
+        step();
+    }
+    counter.start();
+    for _ in 0..runs {
+        step();
+    }
+    Ok(counter.stop()? as f64 / runs as f64)
+}
+
 fn edit_medians(book: &Model, row: i32) -> (Duration, Duration) {
     let mut incr_model = with_mode(book, true);
     let mut reference_model = with_mode(book, false);
@@ -275,6 +312,26 @@ fn main() -> ExitCode {
         Duration::from_micros(250),
     );
     gate.at_most("chains edit one head, p99", p99, Duration::from_micros(500));
+    let row = "chains edit one head, instructions";
+    match incremental_alone(row, || {
+        edit_instructions(
+            &mut with_mode(&book, true),
+            &mut Editor::new(),
+            head,
+            incr_runs(),
+        )
+    }) {
+        Ok(per_edit) => gate.check(
+            row,
+            format!("{per_edit:.0} per edit"),
+            format!("{CHAINS_EDIT_INSTRUCTIONS_SLACK}x the recorded {CHAINS_EDIT_INSTRUCTIONS:.0}"),
+            per_edit <= CHAINS_EDIT_INSTRUCTIONS * CHAINS_EDIT_INSTRUCTIONS_SLACK,
+        ),
+        Err(why) => println!("skip  {row}: {why}"),
+    }
+    if std::env::var_os("INCR_GATE_CHAINS_ONLY").is_some() {
+        return gate.exit_code();
+    }
     let reference = median(edit_times(
         &mut with_mode(&book, false),
         &mut Editor::new(),
@@ -411,10 +468,111 @@ fn main() -> ExitCode {
     let book = running_sum(SCALE_ROWS);
     running_sum_rows(&mut gate, "scale (400k running sum)", &book, SCALE_ROWS, 5);
 
-    if gate.failed == 0 {
-        ExitCode::SUCCESS
-    } else {
-        println!("{} rows missed the gate", gate.failed);
-        ExitCode::FAILURE
+    gate.exit_code()
+}
+
+#[cfg(target_os = "linux")]
+mod instructions {
+    use std::io::Error;
+
+    /// `perf_event_attr` at `PERF_ATTR_SIZE_VER0`, the fields this uses.
+    #[repr(C)]
+    #[derive(Default)]
+    struct Attr {
+        kind: u32,
+        size: u32,
+        config: u64,
+        sample_period: u64,
+        sample_type: u64,
+        read_format: u64,
+        flags: u64,
+        wakeup_events: u32,
+        bp_type: u32,
+        config1: u64,
+    }
+
+    const PERF_TYPE_HARDWARE: u32 = 0;
+    const PERF_COUNT_HW_INSTRUCTIONS: u64 = 1;
+    const DISABLED: u64 = 1 << 0;
+    const EXCLUDE_KERNEL: u64 = 1 << 5;
+    const EXCLUDE_HV: u64 = 1 << 6;
+    const IOC_ENABLE: libc::c_ulong = 0x2400;
+    const IOC_DISABLE: libc::c_ulong = 0x2401;
+    const IOC_RESET: libc::c_ulong = 0x2403;
+
+    /// This thread's user-space instruction counter.
+    pub struct Counter(libc::c_int);
+
+    impl Counter {
+        pub fn open() -> Result<Self, String> {
+            let attr = Attr {
+                kind: PERF_TYPE_HARDWARE,
+                size: std::mem::size_of::<Attr>() as u32,
+                config: PERF_COUNT_HW_INSTRUCTIONS,
+                flags: DISABLED | EXCLUDE_KERNEL | EXCLUDE_HV,
+                ..Attr::default()
+            };
+            // SAFETY: `attr` is a valid VER0 attribute that outlives the call.
+            let fd = unsafe {
+                libc::syscall(
+                    libc::SYS_perf_event_open,
+                    &attr as *const Attr,
+                    0,
+                    -1,
+                    -1,
+                    0,
+                )
+            };
+            if fd < 0 {
+                return Err(format!("perf_event_open: {}", Error::last_os_error()));
+            }
+            Ok(Counter(fd as libc::c_int))
+        }
+
+        pub fn start(&self) {
+            // SAFETY: the fd is this counter's open perf event.
+            unsafe {
+                libc::ioctl(self.0, IOC_RESET, 0);
+                libc::ioctl(self.0, IOC_ENABLE, 0);
+            }
+        }
+
+        pub fn stop(&self) -> Result<u64, String> {
+            let mut count = 0_u64;
+            // SAFETY: the fd is this counter's open perf event, and a read
+            // of it with no read_format fills one u64.
+            let read = unsafe {
+                libc::ioctl(self.0, IOC_DISABLE, 0);
+                libc::read(self.0, (&mut count as *mut u64).cast(), 8)
+            };
+            if read != 8 {
+                return Err(format!("read: {}", Error::last_os_error()));
+            }
+            Ok(count)
+        }
+    }
+
+    impl Drop for Counter {
+        fn drop(&mut self) {
+            // SAFETY: the fd is owned by this counter.
+            unsafe { libc::close(self.0) };
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+mod instructions {
+    pub struct Counter;
+
+    impl Counter {
+        pub fn open() -> Result<Self, String> {
+            Err("no perf counter on this platform".to_string())
+        }
+
+        pub fn start(&self) {}
+
+        pub fn stop(&self) -> Result<u64, String> {
+            Err("no perf counter on this platform".to_string())
+        }
     }
 }
