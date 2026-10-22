@@ -5,7 +5,8 @@
 //! steps; memory is the live heap the incremental state adds, from a
 //! counting allocator. A ratio row times its two sides together, the
 //! reference steps spread evenly among the incremental ones, so a change in
-//! machine load lands on both sides alike.
+//! machine load lands on both sides alike; an absolute row times the
+//! incremental model alone.
 //!
 //! cargo bench -p ironcalc_base --features incr --bench incr_gate
 
@@ -13,7 +14,7 @@ mod incr_common;
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::process::ExitCode;
-use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use incr_common::{
@@ -25,6 +26,7 @@ use ironcalc_base::{incr_probe, Model};
 struct Counting;
 
 static LIVE: AtomicIsize = AtomicIsize::new(0);
+static REFERENCE_MODELS: AtomicUsize = AtomicUsize::new(0);
 
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
@@ -103,11 +105,32 @@ fn median(samples: Vec<Duration>) -> Duration {
     quantile(samples, 0.5)
 }
 
+fn set_mode(model: &mut Model, incremental: bool) {
+    if !incremental {
+        REFERENCE_MODELS.fetch_add(1, Ordering::Relaxed);
+    }
+    model.set_incremental(incremental);
+}
+
 fn with_mode(model: &Model, incremental: bool) -> Model<'static> {
     let mut model = copy(model);
-    model.set_incremental(incremental);
+    set_mode(&mut model, incremental);
     model.evaluate();
     model
+}
+
+/// Runs `measure`, the samples of an absolute row, and panics if it made a
+/// reference model: a reference recalc between the samples would evict the
+/// caches they run on.
+fn incremental_alone<T>(row: &str, measure: impl FnOnce() -> T) -> T {
+    let before = REFERENCE_MODELS.load(Ordering::Relaxed);
+    let measured = measure();
+    assert_eq!(
+        REFERENCE_MODELS.load(Ordering::Relaxed),
+        before,
+        "{row} times an incremental model alone"
+    );
+    measured
 }
 
 /// `warm_up` untimed steps of each side, then `runs` timed steps of `incr`
@@ -182,7 +205,7 @@ fn edit_medians(book: &Model, row: i32) -> (Duration, Duration) {
 fn first_evaluate_step(bytes: &[u8], incremental: bool) -> impl FnMut() -> Duration + '_ {
     move || {
         let mut model = Model::from_bytes(bytes, "en").expect("a saved model");
-        model.set_incremental(incremental);
+        set_mode(&mut model, incremental);
         let start = Instant::now();
         model.evaluate();
         start.elapsed()
@@ -204,12 +227,16 @@ fn first_evaluate_medians(book: &Model, runs: usize) -> (Duration, Duration) {
 fn running_sum_rows(gate: &mut Gate, label: &str, book: &Model, rows: i32, load_runs: usize) {
     let (incr, reference) = edit_medians(book, 1);
     gate.ratio(&format!("{label} edit A1"), incr, reference, 1.5);
-    let (incr, _) = edit_medians(book, rows);
-    gate.at_most(
-        &format!("{label} edit the last row"),
-        incr,
-        Duration::from_micros(100),
-    );
+    let row = format!("{label} edit the last row");
+    let incr = incremental_alone(&row, || {
+        median(edit_times(
+            &mut with_mode(book, true),
+            &mut Editor::new(),
+            rows,
+            incr_runs(),
+        ))
+    });
+    gate.at_most(&row, incr, Duration::from_micros(100));
     let (incr, reference) = edit_medians(book, rows / 2);
     gate.ratio(&format!("{label} edit the midpoint"), incr, reference, 0.8);
     let (incr, reference) = first_evaluate_medians(book, load_runs);
@@ -233,12 +260,14 @@ fn main() -> ExitCode {
 
     let book = chains(ROWS);
     let head = chain_head(ROWS / CHAIN / 2);
-    let times = edit_times(
-        &mut with_mode(&book, true),
-        &mut Editor::new(),
-        head,
-        incr_runs(),
-    );
+    let times = incremental_alone("chains edit one head", || {
+        edit_times(
+            &mut with_mode(&book, true),
+            &mut Editor::new(),
+            head,
+            incr_runs(),
+        )
+    });
     let p99 = quantile(times.clone(), 0.99);
     gate.at_most(
         "chains edit one head, median",
@@ -254,24 +283,27 @@ fn main() -> ExitCode {
     ));
     println!("      chains edit one head, reference median: {reference:.3?}");
     let mut model = with_mode(&book, true);
-    let no_op = median(
-        (0..incr_runs())
-            .map(|_| {
-                let start = Instant::now();
-                model.evaluate();
-                start.elapsed()
-            })
-            .collect(),
-    );
-    let check = median(
-        (0..incr_runs())
-            .map(|_| {
-                let start = Instant::now();
-                assert!(incr_probe::fingerprint_check(&model), "nothing changed");
-                start.elapsed()
-            })
-            .collect(),
-    );
+    let (no_op, check) = incremental_alone("chains no-op evaluate", || {
+        let no_op = median(
+            (0..incr_runs())
+                .map(|_| {
+                    let start = Instant::now();
+                    model.evaluate();
+                    start.elapsed()
+                })
+                .collect(),
+        );
+        let check = median(
+            (0..incr_runs())
+                .map(|_| {
+                    let start = Instant::now();
+                    assert!(incr_probe::fingerprint_check(&model), "nothing changed");
+                    start.elapsed()
+                })
+                .collect(),
+        );
+        (no_op, check)
+    });
     gate.at_most(
         "chains no-op evaluate without the fingerprint check",
         no_op.saturating_sub(check),
