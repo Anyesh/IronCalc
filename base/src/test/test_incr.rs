@@ -2,11 +2,14 @@
 #![allow(clippy::panic)]
 
 use crate::calc_result::CalcResult;
+use crate::evaluation::FormulaCell;
 #[cfg(debug_assertions)]
 use crate::evaluation::SheetRead;
+use crate::expressions::parser::ArrayNode;
+use crate::expressions::token::Error;
 use crate::expressions::types::CellReferenceIndex;
 use crate::incr::ctx;
-use crate::incr::nodes::{tile_of, Constant, Content};
+use crate::incr::nodes::{tile_of, Computed, Constant, Content};
 use crate::model::Model;
 use crate::test::util::new_empty_model;
 use crate::types::{ArrayKind, Cell, FormulaValue, SpillValue};
@@ -179,6 +182,16 @@ fn reading_the_sheet_outside_a_compute_is_not_audited() {
 #[should_panic(expected = "EVAL_CTX is not armed")]
 fn eval_ctx_unarmed_panics() {
     ctx::with_model(|_| ());
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "the incremental state was replaced inside a compute")]
+fn a_compute_cannot_replace_the_incremental_state() {
+    let mut model = new_empty_model();
+    model.set_incremental(true);
+    let _armed = ctx::arm(&mut model);
+    ctx::with_model(|model| model.set_incremental(false));
 }
 
 /// Every cell of the first sheet, as the reference left it.
@@ -529,4 +542,146 @@ fn a_content_node_is_a_text_constant_and_a_tag() {
         std::mem::size_of::<Constant>() + std::mem::size_of::<usize>(),
         "every constant's content slot pays for the widest variant and a tag"
     );
+}
+
+/// What `plan_result` plans for the formula `cell` at `p`, as a node value.
+fn planned(
+    model: &Model,
+    p: CellReferenceIndex,
+    cell: FormulaCell,
+    result: &CalcResult,
+) -> Computed {
+    let (v, spills) = model.plan_result(p, cell, result).unwrap().into_values();
+    Computed::new(
+        v.unwrap(),
+        spills
+            .into_iter()
+            .map(|(row, column, v)| ((row, column), v))
+            .collect(),
+    )
+}
+
+fn results_a_formula_gives(origin: CellReferenceIndex) -> Vec<CalcResult> {
+    vec![
+        CalcResult::Number(1.5),
+        CalcResult::Number(0.0),
+        CalcResult::Number(-0.0),
+        CalcResult::Number(f64::NAN),
+        CalcResult::Number(f64::INFINITY),
+        CalcResult::Number(f64::NEG_INFINITY),
+        CalcResult::Boolean(true),
+        CalcResult::Boolean(false),
+        CalcResult::String(String::new()),
+        CalcResult::String("text".to_string()),
+        CalcResult::new_error(Error::DIV, origin, "Divide by 0".to_string()),
+        CalcResult::new_error(Error::CIRC, origin, String::new()),
+        CalcResult::EmptyCell,
+        CalcResult::EmptyArg,
+        CalcResult::Array(vec![vec![ArrayNode::Number(-0.0)]]),
+        CalcResult::Array(vec![vec![ArrayNode::String(String::new())]]),
+    ]
+}
+
+#[test]
+fn a_formula_stores_what_plan_result_plans() {
+    let mut model = new_empty_model();
+    model._set("B2", "=1");
+    let p = model._parse_reference("B2");
+    let origin = model._parse_reference("D4");
+    let cells = [
+        FormulaCell {
+            f: 0,
+            s: 0,
+            array: None,
+        },
+        FormulaCell {
+            f: 0,
+            s: 0,
+            array: Some((false, (2, 3))),
+        },
+    ];
+    for cell in cells {
+        for (i, result) in results_a_formula_gives(origin).iter().enumerate() {
+            assert_eq!(
+                model.incr_computed(p, cell, result),
+                planned(&model, p, cell, result),
+                "{cell:?}, result {i}"
+            );
+        }
+    }
+}
+
+#[test]
+fn every_content_and_computed_equals_its_clone() {
+    let contents = vec![
+        Content::Empty,
+        Content::Blank,
+        Content::Constant(Constant::Number(0.0)),
+        Content::Constant(Constant::Number(-0.0)),
+        Content::Constant(Constant::Number(f64::NAN)),
+        Content::Constant(Constant::Boolean(false)),
+        Content::Constant(Constant::Text(String::new())),
+        Content::Constant(Constant::Error(Error::REF)),
+        Content::Constant(Constant::MissingString),
+        Content::Formula {
+            f: 3,
+            array: None,
+            pinned: None,
+        },
+        Content::Formula {
+            f: 3,
+            array: Some((ArrayKind::Cse, (2, 3))),
+            pinned: None,
+        },
+        Content::Formula {
+            f: 3,
+            array: Some((ArrayKind::Dynamic, (1, 1))),
+            pinned: Some(Box::new(FormulaValue::Number(-0.0))),
+        },
+        Content::Formula {
+            f: 3,
+            array: None,
+            pinned: Some(Box::new(FormulaValue::Number(2.0))),
+        },
+        Content::Spill {
+            anchor: (1, 2),
+            pinned: None,
+        },
+        Content::Spill {
+            anchor: (1, 2),
+            pinned: Some(Box::new(SpillValue::Text(String::new()))),
+        },
+    ];
+    let values = [
+        FormulaValue::Number(0.0),
+        FormulaValue::Number(-0.0),
+        FormulaValue::Number(f64::NAN),
+        FormulaValue::Boolean(true),
+        FormulaValue::Text(String::new()),
+        FormulaValue::new_error(Error::DIV, "A1".to_string(), "m".to_string()),
+        FormulaValue::Unevaluated,
+    ];
+    let mut computeds = Vec::new();
+    for v in values {
+        computeds.push(Computed::scalar(v.clone()));
+        computeds.push(Computed::new(
+            v.clone(),
+            vec![((1, 2), SpillValue::Number(-0.0))],
+        ));
+        computeds.push(Computed::scalar(v).reading_as(Content::Blank));
+    }
+    // Pairwise distinct, so that equal to its clone says the clone kept
+    // every field.
+    for (i, a) in contents.iter().enumerate() {
+        for (j, b) in contents.iter().enumerate() {
+            assert_eq!(a == b, i == j, "{a:?} {b:?}");
+        }
+        assert_eq!(&a.clone(), a);
+    }
+    for (i, a) in computeds.iter().enumerate() {
+        for (j, b) in computeds.iter().enumerate() {
+            assert_eq!(a == b, i == j, "{a:?} {b:?}");
+        }
+        assert_eq!(&a.clone(), a);
+    }
 }

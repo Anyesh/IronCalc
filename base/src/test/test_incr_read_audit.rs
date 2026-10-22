@@ -98,7 +98,7 @@ const ALLOWED: &[(&str, &str, usize, &str)] = &[
     ("incr/read.rs", "content_on_sheet", 2, TRACKED),
     ("incr/read.rs", "holds_computed_formula", 1, PICKS_A_NODE),
     ("incr/read.rs", "incr_circular", 1, TRACKED),
-    ("incr/read.rs", "incr_dimension", 1, TRACKED),
+    ("incr/read.rs", "incr_dimension_node", 1, TRACKED),
     ("incr/recalc.rs", "a_row_changed", 1, RECALC),
     ("incr/recalc.rs", "incr_check", 3, RECALC),
     ("incr/recalc.rs", "incr_find_dynamic", 2, RECALC),
