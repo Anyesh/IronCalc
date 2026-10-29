@@ -4,6 +4,8 @@
 
 #![allow(dead_code)]
 
+use std::time::{Duration, Instant};
+
 use ironcalc_base::Model;
 
 pub const ROWS: i32 = 100_000;
@@ -112,5 +114,55 @@ impl Editor {
         self.flip = !self.flip;
         let value = if self.flip { -1 } else { row };
         set(model, row, 1, value.to_string());
+    }
+}
+
+pub fn quantile(mut samples: Vec<Duration>, q: f64) -> Duration {
+    samples.sort();
+    let index = ((samples.len() - 1) as f64 * q).round() as usize;
+    samples[index]
+}
+
+pub fn median(samples: Vec<Duration>) -> Duration {
+    quantile(samples, 0.5)
+}
+
+/// `warm_up` untimed steps of each side, then `runs` timed steps of `incr`
+/// with `reference_runs` timed steps of `reference` spread evenly among them.
+pub fn interleaved(
+    warm_up: usize,
+    runs: usize,
+    reference_runs: usize,
+    mut incr: impl FnMut() -> Duration,
+    mut reference: impl FnMut() -> Duration,
+) -> (Vec<Duration>, Vec<Duration>) {
+    for _ in 0..warm_up {
+        incr();
+    }
+    for _ in 0..warm_up {
+        reference();
+    }
+    let mut incr_times = Vec::with_capacity(runs);
+    let mut reference_times = Vec::with_capacity(reference_runs);
+    for run in 0..runs {
+        incr_times.push(incr());
+        for _ in run * reference_runs / runs..(run + 1) * reference_runs / runs {
+            reference_times.push(reference());
+        }
+    }
+    (incr_times, reference_times)
+}
+
+/// One edit of `row` by `editor` and the `evaluate` after it, timed.
+pub fn edit_step<'a>(
+    model: &'a mut Model<'static>,
+    editor: &'a mut Editor,
+    row: i32,
+) -> impl FnMut() -> Duration + 'a {
+    move || {
+        let start = Instant::now();
+        editor.edit(model, row);
+        model.evaluate();
+        start.elapsed()
     }
 }

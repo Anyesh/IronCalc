@@ -23,8 +23,8 @@ use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use incr_common::{
-    chain_head, chains, copy, formula_column, running_sum, running_sum_with_anchor,
-    running_sum_with_cycle, Editor, CHAIN, ROWS,
+    chain_head, chains, copy, edit_step, formula_column, interleaved, median, quantile,
+    running_sum, running_sum_with_anchor, running_sum_with_cycle, Editor, CHAIN, ROWS,
 };
 use ironcalc_base::{incr_probe, Model};
 
@@ -113,16 +113,6 @@ fn incr_runs() -> usize {
         .unwrap_or(200)
 }
 
-fn quantile(mut samples: Vec<Duration>, q: f64) -> Duration {
-    samples.sort();
-    let index = ((samples.len() - 1) as f64 * q).round() as usize;
-    samples[index]
-}
-
-fn median(samples: Vec<Duration>) -> Duration {
-    quantile(samples, 0.5)
-}
-
 fn set_mode(model: &mut Model, incremental: bool) {
     if !incremental {
         REFERENCE_MODELS.fetch_add(1, Ordering::Relaxed);
@@ -149,46 +139,6 @@ fn incremental_alone<T>(row: &str, measure: impl FnOnce() -> T) -> T {
         "{row} times an incremental model alone"
     );
     measured
-}
-
-/// `warm_up` untimed steps of each side, then `runs` timed steps of `incr`
-/// with `reference_runs` timed steps of `reference` spread evenly among them.
-fn interleaved(
-    warm_up: usize,
-    runs: usize,
-    reference_runs: usize,
-    mut incr: impl FnMut() -> Duration,
-    mut reference: impl FnMut() -> Duration,
-) -> (Vec<Duration>, Vec<Duration>) {
-    for _ in 0..warm_up {
-        incr();
-    }
-    for _ in 0..warm_up {
-        reference();
-    }
-    let mut incr_times = Vec::with_capacity(runs);
-    let mut reference_times = Vec::with_capacity(reference_runs);
-    for run in 0..runs {
-        incr_times.push(incr());
-        for _ in run * reference_runs / runs..(run + 1) * reference_runs / runs {
-            reference_times.push(reference());
-        }
-    }
-    (incr_times, reference_times)
-}
-
-/// One edit of `row` by `editor` and the `evaluate` after it, timed.
-fn edit_step<'a>(
-    model: &'a mut Model<'static>,
-    editor: &'a mut Editor,
-    row: i32,
-) -> impl FnMut() -> Duration + 'a {
-    move || {
-        let start = Instant::now();
-        editor.edit(model, row);
-        model.evaluate();
-        start.elapsed()
-    }
 }
 
 /// `edit_step`, `runs` times after a warm-up.
