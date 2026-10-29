@@ -529,14 +529,18 @@ dependencies = [
 
 [[package]]
 name = "incr-compute"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d4e5341a24b2bd6d18231551b03624a43e10a72d8ca1d9b9cadbe4cfbf61b0e"
 dependencies = [
  "incr-core",
 ]
 
 [[package]]
 name = "incr-core"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5bbd4632353721e688482892123b8501a2f6eb1a264718c9c4910652d3ac1d99"
 dependencies = [
  "haphazard",
  "loom",

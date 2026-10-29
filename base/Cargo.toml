@@ -25,8 +25,7 @@ chrono = "0.4"
 bitcode = "0.6.8"
 csv = "1.3.0"
 statrs = { version = "0.18.0", default-features = false, features = [] }
-# A frozen incr worktree at a fixed commit, never one being edited.
-incr-compute = { path = "../../incr/.claude/worktrees/t12-base-0c85491/crates/incr-compute", optional = true }
+incr-compute = { version = "=0.2.0-beta.6", optional = true }
 
 [dev-dependencies]
 serde_json = "1.0"
