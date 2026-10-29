@@ -30,13 +30,8 @@ At 1,000,000 rows (990,000 formulas in *chains*, 1,000,000 in the *running sum*)
 | A1 (every sum changes) | 317 ms | 389 ms (1.23x slower) | 544 ms | 781 ms (1.44x slower) |
 | First calculation after opening | 324 ms | 699 ms (2.2x slower) | 568 ms | 1,369 ms (2.4x slower) |
 
-Each figure is a median of 30 edits by each evaluator, or of 10 first
-calculations each. The two evaluators are timed one step each in turn, so a
-change in machine load reaches both alike. A full recalculation between
-incremental edits also flushes the CPU caches, so the smallest incremental
-edits read slower here than when timed alone: the performance gate times the
-last-row edit alone at 0.0013 ms natively at 400,000 rows (`data/gate-native.txt`).
-The raw numbers are in `data/`.
+Each figure is a median of 30 edits, or of 10 first calculations, with the
+two evaluators timed alternately. The raw numbers are in `data/`.
 
 The workbooks are synthetic and match the ones in `base/benches/incr_common`:
 *chains* is numbers in column A with formulas in B forming 100-row chains, and
@@ -45,11 +40,6 @@ changes every sum below it.
 
 ## What it costs
 
-- **Opening a file:** the first calculation builds the dependency graph, so it
-  takes about 2.2x as long natively and 2.4x in wasm.
-- **Edits that change nearly everything:** an edit that every formula depends
-  on costs about 1.2x the shipped evaluator natively and 1.4x in wasm, since
-  incr does the same work plus its bookkeeping.
 - **Dynamic arrays and circular references:** these are not evaluated
   incrementally. Spills depend on the order of evaluation, so a recalc that
   reaches a dynamic array, a cycle, or a formula that reads one runs the
