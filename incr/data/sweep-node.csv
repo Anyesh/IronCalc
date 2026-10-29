@@ -1,0 +1,26 @@
+workload,rows,incr_ms,reference_ms
+chains edit one head,10000,0.144845,5.809658
+running sum edit the last row,10000,0.010625,4.965027
+running sum edit the midpoint,10000,3.744669,4.955036
+running sum edit A1,10000,7.348748,5.057775
+first evaluate,10000,12.902377,5.061969
+chains edit one head,30000,0.112082,16.035777
+running sum edit the last row,30000,0.016230,14.950604
+running sum edit the midpoint,30000,11.283527,15.393009
+running sum edit A1,30000,23.998122,16.451417
+first evaluate,30000,42.757496,17.113693
+chains edit one head,100000,0.116138,52.285948
+running sum edit the last row,100000,0.041183,54.752262
+running sum edit the midpoint,100000,39.348737,52.981951
+running sum edit A1,100000,80.469641,55.480637
+first evaluate,100000,136.707504,54.562594
+chains edit one head,300000,0.120097,161.173524
+running sum edit the last row,300000,0.042456,169.846142
+running sum edit the midpoint,300000,123.564019,169.383771
+running sum edit A1,300000,243.183451,166.128650
+first evaluate,300000,413.890623,168.581555
+chains edit one head,1000000,0.120554,542.038301
+running sum edit the last row,1000000,0.044955,541.115248
+running sum edit the midpoint,1000000,393.233346,540.172178
+running sum edit A1,1000000,780.618238,543.807074
+first evaluate,1000000,1368.683145,568.074091
