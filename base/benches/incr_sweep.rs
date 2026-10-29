@@ -2,8 +2,9 @@
 //! evaluator and with the shipped one, on the gate's workbooks. Prints one
 //! CSV line per workload and size: medians in milliseconds of
 //! `INCR_SWEEP_RUNS` incremental steps (default 30) against
-//! `INCR_SWEEP_REFERENCE_RUNS` reference steps (default 10), timed together
-//! as in the gate. `INCR_SWEEP_ROWS` is a comma-separated list of sizes.
+//! `INCR_SWEEP_REFERENCE_RUNS` reference steps (default 30), timed together
+//! as in the gate, and of `INCR_SWEEP_LOAD_RUNS` first evaluates of each
+//! (default 10). `INCR_SWEEP_ROWS` is a comma-separated list of sizes.
 //!
 //! cargo bench -p ironcalc_base --features incr --bench incr_sweep
 
@@ -51,6 +52,7 @@ fn ms(duration: Duration) -> f64 {
 struct Sweep {
     runs: usize,
     reference_runs: usize,
+    load_runs: usize,
 }
 
 impl Sweep {
@@ -88,7 +90,7 @@ impl Sweep {
                 start.elapsed()
             }
         };
-        let runs = self.reference_runs;
+        let runs = self.load_runs;
         let (incr, reference) = interleaved(0, runs, runs, step(true), step(false));
         self.report("first evaluate", rows, incr, reference);
     }
@@ -97,7 +99,8 @@ impl Sweep {
 fn main() {
     let sweep = Sweep {
         runs: env_count("INCR_SWEEP_RUNS", 30),
-        reference_runs: env_count("INCR_SWEEP_REFERENCE_RUNS", 10),
+        reference_runs: env_count("INCR_SWEEP_REFERENCE_RUNS", 30),
+        load_runs: env_count("INCR_SWEEP_LOAD_RUNS", 10),
     };
     println!("workload,rows,incr_ms,reference_ms");
     for rows in sizes() {

@@ -81,7 +81,6 @@ export function timedEdit(model, row, edit) {
     return performance.now() - start;
 }
 
-
 // The medians of `runs` incremental and `runs` reference steps, each step
 // returning its own time, taken one of each in turn after `warmUp` of each.
 export function interleaved(incrStep, referenceStep, runs, warmUp) {
