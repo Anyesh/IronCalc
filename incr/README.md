@@ -50,6 +50,10 @@ changes every sum below it.
 - **Edits that change nearly everything:** an edit that every formula depends
   on costs about 1.2x the shipped evaluator natively and 1.4x in wasm, since
   incr does the same work plus its bookkeeping.
+- **Dynamic arrays and circular references:** these are not evaluated
+  incrementally. Spills depend on the order of evaluation, so a recalc that
+  reaches a dynamic array, a cycle, or a formula that reads one runs the
+  shipped evaluation once and takes its values, and costs what it costs today.
 - **Memory:** about 340 bytes per formula and 137 per referenced constant
   natively, and 284 and 113 in wasm (32-bit pointers), on top of the workbook,
   measured by the performance gate (`data/gate-native.txt`, `data/gate-node.txt`).
