@@ -46,6 +46,11 @@ name = "incr_gate"
 harness = false
 required-features = ["incr"]
 
+[[bench]]
+name = "incr_sweep"
+harness = false
+required-features = ["incr"]
+
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 js-sys = { version = "0.3.69" }
 wasm-bindgen = { version = "0.2" }

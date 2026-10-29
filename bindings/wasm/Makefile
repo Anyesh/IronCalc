@@ -79,6 +79,11 @@ bench-incr:
 	wasm-pack build --release --target nodejs --out-dir pkg-nodejs-incr-bench -- --features incr,heap-count
 	PKG_DIR=pkg-nodejs-incr-bench node tests/bench_incr.mjs
 
+# Edit and first-evaluate times against sheet size, as CSV (tests/bench_sweep.mjs).
+bench-sweep:
+	wasm-pack build --release --target nodejs --out-dir pkg-nodejs-incr-bench -- --features incr,heap-count
+	PKG_DIR=pkg-nodejs-incr-bench node tests/bench_sweep.mjs
+
 lint:
 	cargo check
 	cargo fmt -- --check
@@ -89,4 +94,4 @@ clean:
 	rm -rf pkg pkg-xlsx pkg-nodejs pkg-nodejs-xlsx pkg-nodejs-incr pkg-nodejs-xlsx-incr pkg-nodejs-incr-bench
 	rm -f types.js
 
-.PHONY: all wasm xlsx deps lint clean tests tests-incr bench-incr
+.PHONY: all wasm xlsx deps lint clean tests tests-incr bench-incr bench-sweep
