@@ -71,7 +71,7 @@ test suite passes with the feature on and off.
 ## Try it
 
 ```sh
-git clone -b BRANCH https://github.com/FORK/IronCalc.git
+git clone -b incr https://github.com/Anyesh/IronCalc.git
 cd IronCalc
 
 # The size sweep behind the charts, natively and on Node (needs wasm-pack).
