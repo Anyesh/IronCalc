@@ -73,7 +73,7 @@ def plot(env):
             ax.spines[side].set_visible(False)
         for side in ("left", "bottom"):
             ax.spines[side].set_color(GRID)
-        ax.set_xlabel("formulas in the sheet", color=MUTED, fontsize=9)
+        ax.set_xlabel("rows in the sheet", color=MUTED, fontsize=9)
     axes[0].set_ylabel("time (log scale)", color=MUTED, fontsize=9)
     handles = [
         plt.Line2D([], [], color=SHIPPED, lw=2, marker="o", label="IronCalc today"),

@@ -1,0 +1,4 @@
+CPU: Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz, 12 threads, 15 GB RAM, Linux, shared with other work (load 1 to 3 during runs)
+rustc 1.96.1, Node v26.12.1, wasm-pack release builds
+incr-compute 0.2.0-beta.6 from crates.io
+Date: 2026-10-29

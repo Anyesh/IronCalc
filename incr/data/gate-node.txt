@@ -1,0 +1,18 @@
+pass  chains edit one head, median: 0.091 ms (bound 0.750 ms)
+      chains edit one head, p99: 0.158 ms
+pass  chains no-op evaluate without the fingerprint check: 0.001 ms (bound 0.060 ms)
+pass  chains fingerprint check, one sheet: 0.000 ms (bound 0.015 ms)
+      chains edit one head, reference median: 55.970 ms
+pass  running sum edit A1: 1.41x (78.761 ms against 55.941 ms) (bound 1.5x)
+pass  running sum edit the last row: 0.006 ms (bound 0.300 ms)
+pass  running sum edit the midpoint: 0.72x (39.378 ms against 55.006 ms) (bound 0.8x)
+pass  running sum first evaluate: 2.48x (142.568 ms against 57.432 ms) (bound 3x)
+pass  running sum with an anchor, first evaluate: 2.14x (121.463 ms against 56.778 ms) (bound 3.5x)
+      first edit of the last row after a reference recalc, median: 88.473 ms
+pass  reference recalc (an edit read by a cycle pin): 1.01x (56.569 ms against 56.144 ms) (bound 1.3x)
+pass  memory per formula: 284 B (bound 330 B)
+pass  memory per referenced constant: 113 B (bound 140 B)
+pass  scale (400k running sum) edit A1: 1.47x (330.474 ms against 225.366 ms) (bound 1.5x)
+pass  scale (400k running sum) edit the last row: 0.006 ms (bound 0.300 ms)
+pass  scale (400k running sum) edit the midpoint: 0.73x (161.327 ms against 222.442 ms) (bound 0.8x)
+pass  scale (400k running sum) first evaluate: 2.50x (577.825 ms against 230.856 ms) (bound 3x)

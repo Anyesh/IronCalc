@@ -13,28 +13,30 @@ feature off, IronCalc builds and behaves exactly as it does upstream.
 ## Results
 
 Median time per edit (or per first calculation) against sheet size, on an
-Intel i7-9750H laptop. "IronCalc today" is the shipped evaluator handling the
+Intel i7-9750H laptop (`data/machine.txt`). "IronCalc today" is the shipped evaluator handling the
 same edit on the same workbook.
 
 ![Native timings](sweep-native.svg)
 
 ![Browser engine timings](sweep-node.svg)
 
-At 1,000,000 formulas:
+At 1,000,000 rows (990,000 formulas in *chains*, 1,000,000 in the *running sum*):
 
 | Edit | Native today | Native with incr | wasm today | wasm with incr |
 |---|---|---|---|---|
-| One value in a chain | 307 ms | **0.039 ms** (7,900x faster) | 542 ms | **0.12 ms** (4,500x faster) |
-| The last row | 307 ms | **0.0027 ms** (110,000x faster) | 541 ms | **0.045 ms** (12,000x faster) |
-| The middle row (half the sums change) | 332 ms | **192 ms** (1.7x faster) | 540 ms | **393 ms** (1.4x faster) |
-| A1 (every sum changes) | 307 ms | 384 ms (1.25x slower) | 544 ms | 781 ms (1.44x slower) |
-| First calculation after opening | 297 ms | 652 ms (2.2x slower) | 568 ms | 1,369 ms (2.4x slower) |
+| One value in a chain | 314 ms | **0.061 ms** (5,100x faster) | 542 ms | **0.12 ms** (4,500x faster) |
+| The last row | 329 ms | **0.022 ms** (15,000x faster) | 541 ms | **0.045 ms** (12,000x faster) |
+| The middle row (half the sums change) | 317 ms | **196 ms** (1.6x faster) | 540 ms | **393 ms** (1.4x faster) |
+| A1 (every sum changes) | 317 ms | 389 ms (1.23x slower) | 544 ms | 781 ms (1.44x slower) |
+| First calculation after opening | 324 ms | 699 ms (2.2x slower) | 568 ms | 1,369 ms (2.4x slower) |
 
-Each figure is a median: of 30 incremental edits against 10 shipped ones
-natively and 30 each in wasm, and of 10 first calculations each. The two
-evaluators are timed one step each in turn, so a change in machine load
-reaches both alike; that also makes the smallest incremental edits read a
-little slower than when timed alone. The raw numbers are in `data/`.
+Each figure is a median of 30 edits by each evaluator, or of 10 first
+calculations each. The two evaluators are timed one step each in turn, so a
+change in machine load reaches both alike. A full recalculation between
+incremental edits also flushes the CPU caches, so the smallest incremental
+edits read slower here than when timed alone: the performance gate times the
+last-row edit alone at 0.0013 ms natively at 400,000 rows (`data/gate-native.txt`).
+The raw numbers are in `data/`.
 
 The workbooks are synthetic and match the ones in `base/benches/incr_common`:
 *chains* is numbers in column A with formulas in B forming 100-row chains, and
@@ -46,18 +48,20 @@ changes every sum below it.
 - **Opening a file:** the first calculation builds the dependency graph, so it
   takes about 2.2x as long natively and 2.4x in wasm.
 - **Edits that change nearly everything:** an edit that every formula depends
-  on costs about 1.25x the shipped evaluator natively and 1.4x in wasm, since
+  on costs about 1.2x the shipped evaluator natively and 1.4x in wasm, since
   incr does the same work plus its bookkeeping.
 - **Memory:** about 340 bytes per formula and 137 per referenced constant
-  natively, and 284 and 113 in wasm (32-bit pointers), on top of the workbook.
+  natively, and 284 and 113 in wasm (32-bit pointers), on top of the workbook,
+  measured by the performance gate (`data/gate-native.txt`, `data/gate-node.txt`).
 
 ## Same answers as the shipped evaluator
 
 A lockstep differential runs the incremental model and the shipped one side by
 side and compares a snapshot of every cell after every edit: values and their
 error details, spills, links, conditional-format caches, array anchors and the
-restart count. It runs over every workbook IronCalc's own xlsx tests use
-(`tests/calc_tests`, `tests/templates`, `tests/docs`) with eight seeds of 40
+restart count. It runs over every workbook `xlsx/build.rs` turns into tests
+(`tests/calc_tests`, `tests/calc_test_no_export`, `tests/templates`, and
+`tests/docs` minus the five it skips) with eight seeds of 40
 random edits each (constants, formulas, copies of the workbook's own formulas,
 clears, CSE and dynamic arrays, cycles, undo and redo, structural and
 metadata edits), at the normal evaluation depth and at depth 1, natively, and
